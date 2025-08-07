@@ -1,31 +1,38 @@
 // /src/roster.rs
+// Logic for extracting player rows from a team page's HTML table.
+
 use crate::html::{
     slice_between_ci, next_tag_block_ci, inner_after_open_tag,
     strip_tags, normalize_entities, to_lowercase_fast,
 };
 
+/// Given a full team page HTML and a team ID,
+/// return a vector of CSV-ready rows: [Name, #Number, Race, Team, <attributes...>].
 pub fn extract_player_rows(html: &str, team_id: u32) -> Result<Vec<Vec<String>>, Box<dyn std::error::Error>> {
+    // Isolate the roster table contents
     let table = slice_between_ci(html, "<table class=teamroster", "</table>")
         .ok_or("teamroster table not found")?;
 
+    // Extract team name from first row
     let team_name = extract_team_name(table)
         .unwrap_or_else(|| format!("Team {}", team_id));
 
     let mut out_rows: Vec<Vec<String>> = Vec::new();
 
-    // walk each <tr>…</tr>
+    // Iterate over all <tr> blocks in the table
     let mut pos = 0usize;
     while let Some((row_start, row_end)) = next_tag_block_ci(table, "<tr", "</tr>", pos) {
         let tr = &table[row_start..row_end];
         pos = row_end;
 
+        // Keep only player rows (identified by class attribute)
         let lc = to_lowercase_fast(&tr[..tr.len().min(200)]);
         let is_player = lc.contains(r#"class="playerrow""#) || lc.contains(r#"class="playerrow1""#);
         if !is_player {
             continue;
         }
 
-        // collect <td>…</td>
+        // Extract each <td> cell's text
         let mut tds = Vec::new();
         let mut td_pos = 0usize;
         while let Some((td_s, td_e)) = next_tag_block_ci(tr, "<td", "</td>", td_pos) {
@@ -39,11 +46,11 @@ pub fn extract_player_rows(html: &str, team_id: u32) -> Result<Vec<Vec<String>>,
             continue;
         }
 
-        // split first cell into Name, #Number, Race
+        // First cell is fused: Name, #Number, Race → split it
         let fused = tds.remove(0);
         let (name, num_hash, race) = split_first_cell(&fused);
 
-        // final CSV row: Name, #Number, Race, Team, rest...
+        // Compose final row: Name, #Number, Race, Team, rest...
         let mut fields = Vec::with_capacity(4 + tds.len());
         fields.push(name);
         fields.push(num_hash);
@@ -57,7 +64,7 @@ pub fn extract_player_rows(html: &str, team_id: u32) -> Result<Vec<Vec<String>>,
     Ok(out_rows)
 }
 
-// First row's first cell text; cut at " Team owner" or " | " if present.
+/// First row's first cell text; cut at " Team owner" or " | " if present.
 fn extract_team_name(table_inner: &str) -> Option<String> {
     if let Some((tr_s, tr_e)) = next_tag_block_ci(table_inner, "<tr", "</tr>", 0) {
         let tr = &table_inner[tr_s..tr_e];
@@ -79,7 +86,7 @@ fn extract_team_name(table_inner: &str) -> Option<String> {
     None
 }
 
-// "Name #27 Common Drakon" -> ("Name", "#27", "Common Drakon")
+/// "Name #27 Common Drakon" → ("Name", "#27", "Common Drakon")
 fn split_first_cell(fused: &str) -> (String, String, String) {
     if let Some(hidx) = fused.find('#') {
         let name = fused[..hidx].trim().to_string();

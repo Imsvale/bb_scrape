@@ -1,14 +1,5 @@
 // /src/main.rs
-// Minimal, std-only scraper for Brutalball team rosters.
-// Usage:
-//   cargo run --release -- -t 20
-//   cargo run --release -- --all -o players_all.csv
-//
-// Output: NO HEADERS. Each row: Name, #Number, Race, Team, <attributes…>
-// Assumptions (by design):
-// - table has class="teamroster"
-// - player rows have class="playerrow" or "playerrow1"
-// - first cell is "Name #Number Race"
+// Orchestrates the CLI parsing, per-team scraping, and CSV output.
 
 use std::{env, fs::File, io::{BufWriter, Write}};
 mod net;
@@ -23,16 +14,20 @@ struct Cli {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse CLI args
     let cli = parse_cli()?;
 
+    // Decide which teams to scrape
     let team_ids: Vec<u32> = if cli.all {
         (0..32).collect()
     } else {
         vec![cli.one_team.unwrap()]
     };
 
+    // Prepare output file
     let mut out = BufWriter::new(File::create(&cli.out)?);
 
+    // For each team: fetch HTML, extract player rows, write CSV
     for tid in team_ids {
         let path = format!("/brutalball/team.php?i={}", tid);
         let html = net::http_get("dozerverse.com", 80, &path)?;
@@ -48,6 +43,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Minimal CLI parser. Supports:
+/// --all                 Scrape all teams
+/// -t / --team <id>      Scrape a single team by ID (0..31)
+/// -o / --out <file>     Output CSV path
 fn parse_cli() -> Result<Cli, Box<dyn std::error::Error>> {
     let mut all = false;
     let mut one_team = None;
@@ -56,7 +55,7 @@ fn parse_cli() -> Result<Cli, Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--all" => all = true,
+            "-a" | "--all" => all = true,
             "-t" | "--team" => {
                 let v: u32 = args.next().ok_or("Missing team id")?.parse()?;
                 if v >= 32 { return Err("Team id out of range (0..31)".into()); }
