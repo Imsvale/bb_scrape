@@ -4,34 +4,35 @@
 
 A super-lightweight scraper that pulls player data from the Dozerverse/Brutalball website and writes it to a file in CSV format.
 
+By default it grabs players from all teams and outputs to `players.csv`. Just run it and wait a few seconds.
+
 ---
 
 ## Usage (CLI)
 
 ```
-Usage: --all | -t <id> [-o <output.csv>]
+Usage: [ -t <id> ] [-o <output.csv>]
 
 Options:
-  -a, --all             Scrape all teams
   -t, --team <id>       Scrape a single team by ID
-  -o, --out <file>      Output CSV path (default: players.csv or players_all.csv)
+  -o, --out <file>      Output CSV path (default: players.csv)
   -h, --help            Show this help
 ```
 
 ### Examples
 
 ```bash
-# Single team (ID 20: Failurewood Hills) -> players.csv
+# All teams to default file (players.csv)
+./bb-scrape
+
+# All teams to custom file
+./bb-scrape -o league.csv
+
+# Single team (ID 20: Failurewood Hills)
 ./bb-scrape -t 20
 
 # Single team to custom file
 ./bb-scrape -t 20 -o failurewood.csv
-
-# All teams -> players_all.csv
-./bb-scrape --all
-
-# All teams to custom file
-./bb-scrape --all -o league.csv
 ```
 
 ---
@@ -56,5 +57,5 @@ Options:
 ```bash
 # Release build (recommended)
 cargo build --release
-# Binary at: target/release/bb-scrape
+# Binary at: target/release/bb_scrape
 ```

@@ -44,36 +44,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Minimal CLI parser. Supports:
-/// --all                 Scrape all teams
 /// -t / --team <id>      Scrape a single team by ID (0..31)
 /// -o / --out <file>     Output CSV path
+/// -h / --help           Show help text
 fn parse_cli() -> Result<Cli, Box<dyn std::error::Error>> {
-    let mut all = false;
+    let mut all = true;
     let mut one_team = None;
     let mut out = String::new();
 
     let mut args = env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "-a" | "--all" => all = true,
             "-t" | "--team" => {
+                all = false;
                 let v: u32 = args.next().ok_or("Missing team id")?.parse()?;
                 if v >= 32 { return Err("Team id out of range (0..31)".into()); }
                 one_team = Some(v);
             }
             "-o" | "--out" => out = args.next().ok_or("Missing output file")?,
             "-h" | "--help" => {
-                eprintln!("Usage: --all | -t <id> [-o <output.csv>]");
+                eprintln!("Usage: [ -t <id> ] [-o <output.csv>]");
                 std::process::exit(0);
             }
-            _ => return Err(format!("Unknown arg: {}", a).into()),
+            _ => return Err(format!("Unknown argument: {}", a).into()),
         }
     }
-    if !all && one_team.is_none() {
-        return Err("Specify --all or -t <id>".into());
-    }
     if out.is_empty() {
-        out = if all { "players_all.csv".into() } else { "players.csv".into() };
+        out = "players.csv".into();
     }
     Ok(Cli { all, one_team, out })
 }
