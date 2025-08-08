@@ -6,6 +6,10 @@ A super-lightweight scraper that pulls player data from the Dozerverse/Brutalbal
 
 By default it grabs players from all teams and outputs to `players.csv`. Just run it and wait a few seconds.
 
+To grab players only from a specific team, use the ID from the URL along with the `-t` flag documented below.
+
+* E.g. `team.php?i=20` → ID is `20` which is Failurewood Hills.
+
 ---
 
 ## Usage (CLI)
