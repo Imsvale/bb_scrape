@@ -1,27 +1,20 @@
-// /src/csv.rs
-// Minimal CSV writer for rows of String fields.
-// Only quotes fields when needed, and escapes quotes by doubling them.
+// src/csv.rs
 
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{Result, Write};
 
-/// Write a single CSV row to the output.
-///
-/// Fields are joined by commas.
-/// Quotes are added if a field contains a comma, double-quote, or newline.
-/// Double-quotes inside a field are escaped by doubling them.
-pub fn write_csv_row(out: &mut BufWriter<File>, fields: &[String]) -> std::io::Result<()> {
+/// Write a single CSV row to any writer.
+/// Quotes fields that contain comma, quote, or newline; doubles inner quotes.
+pub fn write_row<W: Write>(out: &mut W, fields: &[String]) -> Result<()> {
     let mut first = true;
-    for field in fields {
+    for f in fields {
         if !first {
             write!(out, ",")?;
         }
-        let needs_quote = field.contains(',') || field.contains('"') || field.contains('\n');
-        if needs_quote {
-            let escaped = field.replace('"', "\"\"");
-            write!(out, "\"{}\"", escaped)?;
+        if f.contains(',') || f.contains('"') || f.contains('\n') {
+            let esc = f.replace('"', "\"\"");
+            write!(out, "\"{}\"", esc)?;
         } else {
-            write!(out, "{}", field)?;
+            write!(out, "{}", f)?;
         }
         first = false;
     }

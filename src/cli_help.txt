@@ -1,0 +1,14 @@
+Usage:
+  bb-scrape --page players --all [-o <dir>] [--keephash] [--include-headers]
+  bb-scrape --page players -t <id> [-o <path>] [--keephash] [--include-headers]
+
+Flags:
+  --page players|...      Which page to scrape (default: players)
+  -a, --all              All teams (0..31)
+  -t, --team <id>        Single team id
+  -o, --out <path>       All: directory   Single: dir or filename
+  --keephash             Keep '#' in player number (default strips)
+  --include-headers      Add header row to CSV
+  --list-teams           Output "id,team" for all teams and exit
+  --ids <list>           Subset of team IDs (e.g., 0,2,5-7)
+  -h, --help             This help
