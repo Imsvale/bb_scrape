@@ -1,5 +1,6 @@
 // src/params.rs
 use std::path::PathBuf;
+use crate::csv::Delim;
 
 pub const DEFAULT_OUT_DIR: &str = "out";
 pub const DEFAULT_MERGED_FILENAME: &str = "players.csv";
@@ -26,5 +27,23 @@ pub struct Params {
     pub list_teams: bool,            // list teams then exit
     pub ids_filter: Option<Vec<u32>>,// filter subset of team IDs
     pub per_team: bool,              // write one file per team vs merged single
+    pub format: Delim,
+}
+
+impl Params {
+    pub fn new() -> Self {
+        Self {
+            page: PageKind::Players,
+            all: true,
+            one_team: None,
+            out: Some(PathBuf::from(DEFAULT_OUT_DIR).join(DEFAULT_MERGED_FILENAME)),
+            keep_hash: false,
+            include_headers: false,
+            list_teams: false,
+            ids_filter: None,
+            per_team: false,
+            format: Delim::Csv,
+        }
+    }
 }
 

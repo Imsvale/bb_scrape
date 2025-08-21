@@ -13,6 +13,6 @@ pub mod teams;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli::detect_mode()? {
         cli::Mode::Cli(params) => cli::run(params),
-        cli::Mode::Gui => gui::run(),
+        cli::Mode::Gui(params) => gui::run(params),
     }
 }

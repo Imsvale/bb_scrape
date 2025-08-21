@@ -13,6 +13,7 @@ use crate::csv;
 pub fn write_rows_start(
     path: &Path,
     headers: Option<&[String]>,
+    delim: &csv::Delim,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -22,18 +23,22 @@ pub fn write_rows_start(
     let file = File::create(path)?; // truncate/overwrite
     let mut out = BufWriter::new(file);
     if let Some(h) = headers {
-        csv::write_row(&mut out, h)?;
+        csv::write_row(&mut out, h, delim)?;
     }
     out.flush()?;
     Ok(())
 }
 
 /// Append multiple rows to an existing CSV file (must be created already).
-pub fn append_rows(path: &Path, rows: &[Vec<String>]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn append_rows(
+    path: &Path, 
+    rows: &[Vec<String>],
+    delim: &csv::Delim,
+) -> Result<(), Box<dyn std::error::Error>> {
     let file = OpenOptions::new().append(true).open(path)?;
     let mut out = BufWriter::new(file);
     for row in rows {
-        csv::write_row(&mut out, row)?;
+        csv::write_row(&mut out, row, delim)?;
     }
     out.flush()?;
     Ok(())

@@ -22,6 +22,11 @@ pub trait Progress {
     fn update_status(&mut self, msg: &str) {}
 }
 
+pub struct DataSet {
+    pub headers: Option<Vec<String>>,
+    pub rows: Vec<Vec<String>>,
+}
+
 /// A no-op progress sink you can pass when you don't care.
 pub struct NullProgress;
 impl Progress for NullProgress {}
@@ -46,8 +51,40 @@ pub fn run(
     }
 }
 
-/* ---------------- Players implementation ---------------- */
+// Collect players into memory according to selection/filter.
+// Does NOT write files. Honors include_headers/keep_hash; merges rows.
+pub fn collect_players(params: &Params) -> Result<DataSet, Box<dyn std::error::Error>> {
+    // Build ID list
+    let mut ids: Vec<u32> = if params.all {
+        // GUI: default “all teams selected”
+        // CLI: same if no one_team & no ids_filter
+        (0..32).collect()
+    } else {
+        vec![params.one_team.expect("one_team is required when not 'all'")]
+    };
 
+    if let Some(filter) = &params.ids_filter {
+        let mut f = filter.clone();
+        f.sort_unstable();
+        ids.retain(|id| f.binary_search(id).is_ok());
+    }
+
+    let mut merged_headers: Option<Vec<String>> = None;
+    let mut rows: Vec<Vec<String>> = Vec::new();
+
+    for (i, id) in ids.iter().copied().enumerate() {
+        let bundle = specs::players::fetch_and_extract(id, params.keep_hash, params.include_headers)?;
+        // take headers only once (if requested and available)
+        if merged_headers.is_none() && params.include_headers {
+            merged_headers = bundle.headers.clone();
+        }
+        rows.extend(bundle.rows);
+    }
+
+    Ok(DataSet { headers: merged_headers, rows })
+}
+
+/* ---------------- Players implementation ---------------- */
 fn get_players(
     params: &Params,
     mut progress: Option<&mut dyn Progress>,
@@ -78,6 +115,8 @@ fn get_players(
 
     let mut written = Vec::with_capacity(ids.len());
 
+    let delim = &params.format;
+
     if params.all && params.per_team {
         // ---------- PER-TEAM FILES ----------
         // -o must be a directory (create if missing). If omitted → "./out"
@@ -95,8 +134,8 @@ fn get_players(
             let stem = sanitize_team_filename(&bundle.team_name, id);
             let path = resolve_team_filename(&outdir, &stem, &mut seen);
 
-            write_rows_start(&path, bundle.headers.as_deref())?;
-            append_rows(&path, &bundle.rows)?;
+            write_rows_start(&path, bundle.headers.as_deref(), delim)?;
+            append_rows(&path, &bundle.rows, delim)?;
             if let Some(p) = progress.as_deref_mut() {
                 p.item_done(id, &path);
             }
@@ -127,14 +166,14 @@ fn get_players(
             let bundle = specs::players::fetch_and_extract(id, params.keep_hash, params.include_headers)?;
             if !wrote_header {
                 // use site headers if present and include_headers==true
-                write_rows_start(&resolved, bundle.headers.as_deref())?;
+                write_rows_start(&resolved, bundle.headers.as_deref(), delim)?;
                 wrote_header = true;
             } else {
                 // ensure file exists already (write_rows_start creates/truncates only once)
                 // then append rows for subsequent teams
                 // (no-op here; just fall through)
             }
-            append_rows(&resolved, &bundle.rows)?;
+            append_rows(&resolved, &bundle.rows, delim)?;
 
             if let Some(p) = progress.as_deref_mut() {
                 p.item_done(id, &resolved);
