@@ -9,4 +9,5 @@ pub mod file;
 pub mod gui;
 pub mod params;
 pub mod runner;
+pub mod store;
 pub mod teams;

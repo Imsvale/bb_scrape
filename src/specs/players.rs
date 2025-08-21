@@ -30,7 +30,7 @@ pub fn fetch_and_extract(
         let mut hdr = vec!["Name".to_string(), "Number".to_string(), "Race".to_string(), "Team".to_string()];
         if !site_headers.is_empty() {
             // Drop fused "Player" header if present
-            let tail = if !site_headers.is_empty() && site_headers[0].to_ascii_lowercase().contains("player") {
+            let tail = if !site_headers.is_empty() && site_headers[0].to_ascii_lowercase().contains("name") {
                 site_headers.iter().skip(1).cloned().collect::<Vec<_>>()
             } else {
                 site_headers.clone()

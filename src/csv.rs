@@ -7,6 +7,62 @@ pub enum Delim {
     Tsv, // tab
 }
 
+pub fn parse_rows(text: &str, delim: &Delim) -> Vec<Vec<String>> {
+    let sep = match delim { Delim::Csv => ',', Delim::Tsv => '\t' };
+    let mut rows = Vec::new();
+    let mut field = String::new();
+    let mut row = Vec::new();
+    let mut in_quotes = false;
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => {
+                if in_quotes {
+                    if matches!(chars.peek(), Some('"')) {
+                        chars.next(); // double-quote escape
+                        field.push('"');
+                    } else {
+                        in_quotes = false;
+                    }
+                } else {
+                    in_quotes = true;
+                }
+            }
+            c if c == sep && !in_quotes => {
+                row.push(field.clone()); field.clear();
+            }
+            '\n' | '\r' if !in_quotes => {
+                if ch == '\r' && matches!(chars.peek(), Some('\n')) { chars.next(); }
+                row.push(field.clone()); field.clear();
+                if !row.is_empty() && !(row.len() == 1 && row[0].is_empty()) {
+                    rows.push(std::mem::take(&mut row));
+                } else {
+                    row.clear();
+                }
+            }
+            _ => field.push(ch),
+        }
+    }
+    if in_quotes { /* tolerate trailing quote mismatch by finishing the field */ }
+    if !in_quotes {
+        row.push(field);
+        if !row.is_empty() { rows.push(row); }
+    }
+    rows
+}
+
+pub fn detect_headers(mut rows: Vec<Vec<String>>) -> (Option<Vec<String>>, Vec<Vec<String>>) {
+    if rows.is_empty() { return (None, rows); }
+    let first = &rows[0];
+    // Simple heuristic for Players page
+    if !first.is_empty() && first[0].eq_ignore_ascii_case("name") {
+        let header = rows.remove(0);
+        return (Some(header), rows);
+    }
+    (None, rows)
+}
+
 fn needs_quotes(field: &str, delim: &Delim) -> bool {
     match delim {
         Delim::Csv => field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r'),

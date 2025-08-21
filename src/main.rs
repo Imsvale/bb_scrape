@@ -1,14 +1,16 @@
 // src/main.rs
 
-pub mod cli;
-pub mod gui;
-pub mod core;
-pub mod file;
-pub mod specs;
-pub mod csv;
-pub mod runner;
-pub mod params;
-pub mod teams;
+mod core;
+mod specs;
+
+mod cli;
+mod csv;
+mod file;
+mod gui;
+mod params;
+mod runner;
+mod store;
+mod teams;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli::detect_mode()? {

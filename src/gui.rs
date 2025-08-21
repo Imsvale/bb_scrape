@@ -1,5 +1,16 @@
 // src/gui.rs
-use std::error::Error;
+#![allow(unused)]
+use std::{
+    error::Error,
+    path::PathBuf, 
+    sync::{ Arc, Mutex }, 
+    thread,
+};
+
+use eframe::{egui};
+use egui::{RichText, Layout, Align, TextWrapMode};
+use egui_extras::{TableBuilder, Column};
+
 use crate::{
     csv::{Delim, rows_to_string},
     params::{
@@ -8,11 +19,9 @@ use crate::{
         DEFAULT_OUT_DIR, 
         DEFAULT_MERGED_FILENAME },
     runner::{self, Progress},
+    store,
     teams,
 };
-use eframe::egui;
-use egui_extras::{TableBuilder, Column};
-use std::{path::PathBuf, sync::{Arc, Mutex}, thread};
 
 pub fn run(params: Params) -> Result<(), Box<dyn Error>> {
     let options = eframe::NativeOptions::default();
@@ -48,6 +57,15 @@ pub struct App {
 
 impl App {
     pub fn new(params: Params) -> Self {
+        let mut headers = None;
+        let mut rows = Vec::new();
+        let mut status = "Idle".to_string();
+
+        if let Ok(ds) = store::load_players_local() {
+            headers = ds.headers;
+            rows = ds.rows;
+            status = "Loaded local data".to_string();
+        }
         let teams = match teams::load() {
             Ok(v) if !v.is_empty() => v,
             _ => (0u32..32).map(|id| (id, format!("Team {}", id))).collect(),
@@ -61,9 +79,9 @@ impl App {
             last_clicked: None,
             fmt: UiFormat::Csv,
             out_path: format!("{}/{}", DEFAULT_OUT_DIR, DEFAULT_MERGED_FILENAME),
-            headers: None,
-            rows: Vec::new(),
-            status: Arc::new(Mutex::new("Idle".into())),
+            headers,
+            rows,
+            status: Arc::new(Mutex::new(status)),
             running: false,
         }
     }
@@ -179,18 +197,16 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 if ui.button("All").clicked() {
                     self.selected = self.teams.iter().map(|(id, _)| *id).collect();
-                    self.sync_collect();
                 }
                 if ui.button("None").clicked() {
                     self.selected.clear();
-                    self.sync_collect();
                 }
             });
             ui.separator();
 
             egui::ScrollArea::vertical().show(ui, |ui| {
 
-                let mut needs_sync = false;
+                let mut needs_status = false;
 
                 for (idx, (id, name)) in self.teams.iter().enumerate() {
                     let is_selected = self.selected.contains(id);
@@ -213,11 +229,11 @@ impl eframe::App for App {
                             self.last_clicked = Some(idx);
                         }
                         
-                        needs_sync = true;
+                        needs_status = true;
                     }
                 }
-                if needs_sync {
-                    self.sync_collect();
+                if needs_status {
+                    *self.status.lock().unwrap() = "Selection changed — not scraped yet.".into();
                 }
             });
         });
@@ -231,6 +247,14 @@ impl eframe::App for App {
             let mut changed = false;
             changed |= ui.checkbox(&mut self.params.include_headers, "Include headers").changed();
             changed |= ui.checkbox(&mut self.params.keep_hash, "Keep hash in player numbers").changed();
+
+            if changed {
+                // Rebuild the view rows based on current toggles
+                let transformed = apply_keep_hash(&self.rows, self.params.keep_hash);
+                self.rows = transformed;
+                *self.status.lock().unwrap() = "Options changed — view updated.".into();
+            }
+
 
             // Format selector (CSV/TSV) — affects Copy/Export only
             ui.horizontal(|ui| {
@@ -283,6 +307,15 @@ impl eframe::App for App {
                     }
                 }
 
+                let red = egui::Color32::from_rgb(220, 30, 30);
+                let black = egui::Color32::BLACK;
+
+                if ui.add(
+                    egui::Button::new(egui::RichText::new("SCRAPE").color(black).strong())
+                        .fill(red)
+                ).clicked() {
+                    self.sync_collect();
+                }
             });
 
             ui.separator();
@@ -292,42 +325,94 @@ impl eframe::App for App {
                 .or_else(|| self.rows.get(0).map(|r| r.len()))
                 .unwrap_or(0);
 
+            // Canonical columns (Name, Number, Race, Team) get wider baselines.
+            // Numeric columns get compact baseline and are resizable by the user.
             let mut table = TableBuilder::new(ui)
                 .striped(true)
-                .column(Column::auto().resizable(true).at_least(60.0));
+                .min_scrolled_height(0.0)
+                .column(Column::auto().resizable(true).at_least(180.0)) // Name
+                .column(Column::auto().resizable(true).at_least(64.0))  // Number
+                .column(Column::auto().resizable(true).at_least(120.0)) // Race
+                .column(Column::auto().resizable(true).at_least(140.0));// Team
 
-            // Add remaining columns (we already added 1 above)
-            for _ in 1..cols {
-                table = table.column(Column::auto());
+            // Remaining columns (usually numeric): narrower
+            for _ in 4..cols {
+                table = table.column(Column::auto().resizable(true).at_least(44.0));
             }
 
             table
-                .header(20.0, |mut header| {
+                .header(24.0, |mut header| {
                     if let Some(hs) = &self.headers {
                         for h in hs {
-                            header.col(|ui| { ui.label(h); });
+                            header.col(|ui| {
+                                ui.scope(|ui| {
+                                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend); // no wrap
+                                    // Bold header; let theme decide color for now
+                                    ui.label(RichText::new(h).strong());
+                                });
+                            });
                         }
                     } else {
                         for i in 0..cols {
-                            header.col(|ui| { ui.label(format!("Col {}", i + 1)); });
+                            header.col(|ui| {
+                                ui.scope(|ui| {
+                                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                                    ui.label(RichText::new(format!("Col {}", i + 1)).strong());
+                                });
+                            });
                         }
                     }
                 })
                 .body(|mut body| {
-                    body.rows(18.0, self.rows.len(), |mut row| {
+                    body.rows(20.0, self.rows.len(), |mut row| {
                         let row_idx = row.index();
                         if let Some(data) = self.rows.get(row_idx) {
-                            for cell in data {
-                                row.col(|ui| { ui.label(cell); });
+                            for (ci, cell) in data.iter().enumerate() {
+                                row.col(|ui| {
+                                    ui.scope(|ui| {
+                                        ui.style_mut().wrap_mode = Some(TextWrapMode::Extend); // no wrap
+
+                                        let rt = RichText::new(cell);
+                                        if ci == 0 {
+                                            // Name: left align
+                                            ui.label(rt);
+                                        } else {
+                                            // Others: center horizontally
+                                            ui.with_layout(
+                                                Layout::centered_and_justified(egui::Direction::LeftToRight),
+                                                |ui| { ui.label(rt); }
+                                            );
+                                        }
+                                    });
+                                });
                             }
                         }
                     });
                 });
-
-            // If any options changed, recollect immediately (synchronous for simplicity)
-            if changed { self.sync_collect(); }
-        });
+        
+        }); // End egui::CentralPanel::default().show
     }
+}
+
+fn apply_keep_hash(rows: &[Vec<String>], keep_hash: bool) -> Vec<Vec<String>> {
+    // Copy-on-transform; we only touch column 1 if present.
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        if r.len() > 1 {
+            let mut nr = r.clone();
+            if keep_hash {
+                if !nr[1].starts_with('#') && !nr[1].is_empty() {
+                    nr[1] = format!("#{}", nr[1]);
+                }
+            } else {
+                nr[1] = nr[1].trim_start_matches('#').to_string();
+            }
+            out.push(nr);
+        } else {
+            out.push(r.clone());
+        }
+    }
+    out
 }
 
 /* ---------- Progress adapter ---------- */

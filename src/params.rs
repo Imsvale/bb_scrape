@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::csv::Delim;
 
 pub const DEFAULT_OUT_DIR: &str = "out";
+pub const PLAYERS_SUBDIR: &str = "players";
 pub const DEFAULT_MERGED_FILENAME: &str = "players.csv";
 pub const HOST: &str = "dozerverse.com";
 pub const PREFIX: &str = "/brutalball/";

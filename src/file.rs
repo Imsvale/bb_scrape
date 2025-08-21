@@ -61,7 +61,6 @@ pub fn normalize_separators(p: &str) -> String {
 
 pub fn normalize_dir_path(p: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let pb = PathBuf::from(normalize_separators(p));
-    if pb.extension().is_some() { return Err("When using --all, -o must be a directory, not a file".into()); }
     Ok(pb)
 }
 
