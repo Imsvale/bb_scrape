@@ -8,16 +8,14 @@ use std::{
 };
 
 use eframe::{egui};
-use egui::{RichText, Layout, Align, TextWrapMode};
+use egui::{RichText, Layout, Align, TextWrapMode, Direction};
 use egui_extras::{TableBuilder, Column};
 
 use crate::{
-    csv::{Delim, rows_to_string},
+    csv::{
+        rows_to_string, to_export_string, Delim },
     params::{
-        Params, 
-        PageKind, 
-        DEFAULT_OUT_DIR, 
-        DEFAULT_MERGED_FILENAME },
+        PageKind, Params, DEFAULT_SINGLE_FILE, DEFAULT_OUT_DIR, PLAYERS_SUBDIR },
     runner::{self, Progress},
     store,
     teams,
@@ -45,6 +43,7 @@ pub struct App {
     // format & output path (GUI only)
     fmt: UiFormat,
     out_path: String,
+    out_path_dirty: bool,
 
     // in-memory data
     headers: Option<Vec<String>>,
@@ -66,11 +65,20 @@ impl App {
             rows = ds.rows;
             status = "Loaded local data".to_string();
         }
+        // prune stray empty rows just in case
+        rows.retain(|r| !r.is_empty() && !(r.len() == 1 && r[0].trim().is_empty()));
+
         let teams = match teams::load() {
             Ok(v) if !v.is_empty() => v,
             _ => (0u32..32).map(|id| (id, format!("Team {}", id))).collect(),
         };
         let selected = teams.iter().map(|(id, _)| *id).collect();
+
+        let out_path = if params.single_file {
+            format!("{}/{}/{}", DEFAULT_OUT_DIR, PLAYERS_SUBDIR, DEFAULT_SINGLE_FILE)
+        } else {
+            format!("{}/{}/", DEFAULT_OUT_DIR, PLAYERS_SUBDIR)
+        };
 
         Self {
             params,
@@ -78,13 +86,17 @@ impl App {
             selected,
             last_clicked: None,
             fmt: UiFormat::Csv,
-            out_path: format!("{}/{}", DEFAULT_OUT_DIR, DEFAULT_MERGED_FILENAME),
+            out_path,
+            out_path_dirty: false,
             headers,
             rows,
             status: Arc::new(Mutex::new(status)),
             running: false,
         }
     }
+
+    fn is_blank_row(r: &[String]) -> bool { r.iter().all(|s| s.trim().is_empty()) }
+
 
     fn apply_selection(&mut self) {
         if self.selected.is_empty() {
@@ -167,6 +179,11 @@ impl App {
             Ok(ds) => {
                 self.headers = ds.headers;
                 self.rows = ds.rows;
+
+                if let Some(ref h) = self.headers {
+                    let _ = store::save_players_headers(h);
+                }
+
                 *self.status.lock().unwrap() = "Ready".into();
             }
             Err(e) => {
@@ -174,11 +191,6 @@ impl App {
             }
         }
         self.running = false;
-    }
-
-    
-    fn current_delim(&self) -> Delim {
-        match self.fmt { UiFormat::Csv => Delim::Csv, UiFormat::Tsv => Delim::Tsv }
     }
 }
 
@@ -240,65 +252,104 @@ impl eframe::App for App {
 
         // Center: options + display + copy/export
         egui::CentralPanel::default().show(ctx, |ui| {
+
             ui.heading("Players");
+
             ui.separator();
 
-            // Options (affect data immediately)
-            let mut changed = false;
-            changed |= ui.checkbox(&mut self.params.include_headers, "Include headers").changed();
-            changed |= ui.checkbox(&mut self.params.keep_hash, "Keep hash in player numbers").changed();
-
-            if changed {
-                // Rebuild the view rows based on current toggles
-                let transformed = apply_keep_hash(&self.rows, self.params.keep_hash);
-                self.rows = transformed;
-                *self.status.lock().unwrap() = "Options changed — view updated.".into();
-            }
-
-
             // Format selector (CSV/TSV) — affects Copy/Export only
+            let prev_fmt = self.fmt;
             ui.horizontal(|ui| {
                 ui.label("Format:");
                 ui.selectable_value(&mut self.fmt, UiFormat::Csv, "CSV");
                 ui.selectable_value(&mut self.fmt, UiFormat::Tsv, "TSV");
             });
 
-            ui.separator();
+            if self.fmt != prev_fmt {
+                // push into params so runner/export uses it everywhere
+                self.params.format = match self.fmt {
+                    UiFormat::Csv => Delim::Csv,
+                    UiFormat::Tsv => Delim::Tsv,
+               };
+
+                // If the output path wasn't manually edited and we're in single-file mode,
+                // flip the filename extension .csv <-> .tsv to match the new format.
+                if !self.out_path_dirty && self.params.single_file {
+                    if let Some(dot) = self.out_path.rfind('.') {
+                        let (stem, ext) = self.out_path.split_at(dot);
+                        match self.params.format {
+                            Delim::Csv if ext.eq_ignore_ascii_case(".tsv") => {
+                                self.out_path = format!("{stem}.csv");
+                            }
+                            Delim::Tsv if ext.eq_ignore_ascii_case(".csv") => {
+                                self.out_path = format!("{stem}.tsv");
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            ui.checkbox(&mut self.params.include_headers, "Include headers");
+            ui.checkbox(&mut self.params.keep_hash, "Keep hash in player numbers");
 
             // Export options
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.params.per_team, "Export per-team files");
+                let single_file_checkbox = ui.checkbox(&mut self.params.single_file, "Single file");
                 ui.label("Output:");
-                ui.text_edit_singleline(&mut self.out_path);
-            });
+                let resp = ui.text_edit_singleline(&mut self.out_path);
+                if resp.changed() {
+                    self.out_path_dirty = true;
+                }
 
-            // Status
-            let status = self.status.lock().unwrap().clone();
-            ui.label(format!("Status: {}", status));
+                let ext = match self.fmt {
+                    UiFormat::Csv => "csv",
+                    UiFormat::Tsv => "tsv"
+                };
+
+                let single_file_before = self.params.single_file;
+                if single_file_checkbox.changed() {
+                    if !self.out_path_dirty {
+                        if self.params.single_file {
+                            // switched to merged: use single file
+                            self.out_path = format!("{DEFAULT_OUT_DIR}/{PLAYERS_SUBDIR}/{DEFAULT_SINGLE_FILE}.{ext}");
+                        } else {
+                            // switched to per-team: use directory
+                            self.out_path = format!("{DEFAULT_OUT_DIR}/{PLAYERS_SUBDIR}/");
+                        }
+                    }
+                }
+            });
 
             ui.horizontal(|ui| {
                 if ui.button("Copy").clicked() {
-                    // Merge to text in selected format and copy
-                    let txt = rows_to_string(&self.rows, &self.headers, &self.current_delim());
+                    let txt = to_export_string(
+                        &self.headers,
+                        &self.rows,
+                        self.params.include_headers,
+                        self.params.keep_hash,
+                        self.params.format, // CSV / TSV
+                    );
                     ctx.copy_text(txt);
-                    *self.status.lock().unwrap() = "Copied to clipboard.".into();
+                    *self.status.lock().unwrap() = "Copied to clipboard".into();
                 }
 
                 if ui.button("Export").clicked() {
-                    let res = if self.params.per_team {
-                        self.params.out = Some(PathBuf::from(&self.out_path));
-                        self.params.per_team = true;
-                        runner::run(&self.params, None)
-                    } else {
-                        // merged export path stays special-case
+                    let res = if self.params.single_file {
+                        // SINGLE-FILE EXPORT: File name as given, or default
                         let path = PathBuf::from(&self.out_path);
                         if let Some(parent) = path.parent() {
                             if !parent.as_os_str().is_empty() { let _ = std::fs::create_dir_all(parent); }
                         }
-                        let txt = rows_to_string(&self.rows, &self.headers, &self.current_delim());
+                        let txt = rows_to_string(&self.rows, &self.headers, self.params.format);
                         std::fs::write(&path, txt)
                             .map(|_| runner::RunSummary { files_written: vec![path] })
                             .map_err(|e| e.into())
+                    } else {
+                        // MULTI-FILE EXPORT: File names from team names
+                        self.params.out = Some(PathBuf::from(&self.out_path));
+                        self.params.format = match self.fmt { UiFormat::Csv => Delim::Csv, UiFormat::Tsv => Delim::Tsv };
+                        runner::run(&self.params, None)
                     };
 
                     match res {
@@ -316,6 +367,10 @@ impl eframe::App for App {
                 ).clicked() {
                     self.sync_collect();
                 }
+
+                // Status
+                let status = self.status.lock().unwrap().clone();
+                ui.label(format!("Status: {}", status));
             });
 
             ui.separator();
@@ -331,13 +386,13 @@ impl eframe::App for App {
                 .striped(true)
                 .min_scrolled_height(0.0)
                 .column(Column::auto().resizable(true).at_least(180.0)) // Name
-                .column(Column::auto().resizable(true).at_least(64.0))  // Number
+                .column(Column::auto().resizable(true).at_least(30.0))  // Number
                 .column(Column::auto().resizable(true).at_least(120.0)) // Race
                 .column(Column::auto().resizable(true).at_least(140.0));// Team
 
             // Remaining columns (usually numeric): narrower
             for _ in 4..cols {
-                table = table.column(Column::auto().resizable(true).at_least(44.0));
+                table = table.column(Column::auto().resizable(true).at_least(30.0));
             }
 
             table
@@ -347,8 +402,11 @@ impl eframe::App for App {
                             header.col(|ui| {
                                 ui.scope(|ui| {
                                     ui.style_mut().wrap_mode = Some(TextWrapMode::Extend); // no wrap
-                                    // Bold header; let theme decide color for now
-                                    ui.label(RichText::new(h).strong());
+                                    ui.with_layout(
+                                        Layout::left_to_right(Align::Center),
+                                        // Bold header; let theme decide color for now
+                                        |ui| {ui.label(RichText::new(h).strong()); }
+                                    );
                                 });
                             });
                         }
@@ -357,7 +415,10 @@ impl eframe::App for App {
                             header.col(|ui| {
                                 ui.scope(|ui| {
                                     ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                                    ui.label(RichText::new(format!("Col {}", i + 1)).strong());
+                                    ui.with_layout(
+                                        Layout::left_to_right(Align::Center),
+                                        |ui| { ui.label(RichText::new(format!("Col {}", i + 1)).strong()); }
+                                    );
                                 });
                             });
                         }
@@ -379,7 +440,7 @@ impl eframe::App for App {
                                         } else {
                                             // Others: center horizontally
                                             ui.with_layout(
-                                                Layout::centered_and_justified(egui::Direction::LeftToRight),
+                                                Layout::left_to_right(Align::Center),
                                                 |ui| { ui.label(rt); }
                                             );
                                         }

@@ -1,41 +1,55 @@
 // src/store.rs
+use std::{fs, io, path::{PathBuf}, time::SystemTime, collections::HashMap};
+use crate::csv::{self, parse_rows, detect_headers, Delim};
+use crate::params::{DEFAULT_OUT_DIR, PLAYERS_SUBDIR, DEFAULT_SINGLE_FILE};
 
-use std::collections::HashMap;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+pub struct Dataset { pub headers: Option<Vec<String>>, pub rows: Vec<Vec<String>> }
 
-use crate::csv::{parse_rows, detect_headers, Delim};
-use crate::file::sanitize_team_filename; // you already have this
-use crate::params::{DEFAULT_OUT_DIR, PLAYERS_SUBDIR, DEFAULT_MERGED_FILENAME};
-
-pub struct Dataset {
-    pub headers: Option<Vec<String>>,
-    pub rows: Vec<Vec<String>>,
+fn headers_path() -> PathBuf {
+    PathBuf::from(DEFAULT_OUT_DIR).join(PLAYERS_SUBDIR).join("$headers")
 }
 
-/// Load Players dataset from local store:
-/// 1) load merged out/players/players.csv if present
-/// 2) for each per-team CSV newer than merged, override that team’s rows
+pub fn save_players_headers(headers: &[String]) -> io::Result<()> {
+    let p = headers_path();
+
+    // Ensure parent directories exist
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+
+    let file = fs::File::create(&p)?; // Use the computed path here
+    let mut writer = io::BufWriter::new(file);
+    csv::write_row(&mut writer, headers, Delim::Csv)?;
+
+    Ok(())
+}
+
+pub fn load_players_headers() -> Option<Vec<String>> {
+    let p = headers_path();
+    let txt = fs::read_to_string(p).ok()?;
+    let rows = parse_rows(&txt, Delim::Csv);
+    rows.into_iter().next()
+}
+
 pub fn load_players_local() -> Result<Dataset, Box<dyn std::error::Error>> {
     let dir = PathBuf::from(DEFAULT_OUT_DIR).join(PLAYERS_SUBDIR);
-    let merged_path = dir.join(DEFAULT_MERGED_FILENAME);
+    let merged_path = dir.join(DEFAULT_SINGLE_FILE);
 
-    let mut headers: Option<Vec<String>> = None;
+    let mut headers = load_players_headers();
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut merged_mtime: Option<SystemTime> = None;
 
-    // 1) Load merged if exists
     if merged_path.exists() {
         let text = fs::read_to_string(&merged_path)?;
-        let parsed = parse_rows(&text, &Delim::Csv);
+        let parsed = parse_rows(&text, Delim::Csv);
         let (h, r) = detect_headers(parsed);
-        headers = h;
+        if headers.is_none() { headers = h; }
         rows = r;
         merged_mtime = fs::metadata(&merged_path).ok().and_then(|m| m.modified().ok());
     }
 
-    // Build index of existing rows by team name (col 3)
     let mut by_team: HashMap<String, Vec<Vec<String>>> = HashMap::new();
     for row in rows.drain(..) {
         if row.len() > 3 {
@@ -43,55 +57,44 @@ pub fn load_players_local() -> Result<Dataset, Box<dyn std::error::Error>> {
         }
     }
 
-    // 2) Scan per-team files and overlay newer
     if dir.exists() {
         for entry in fs::read_dir(&dir)? {
-            let entry = entry?;
-            let path = entry.path();
+            let path = entry?.path();
             if !path.is_file() { continue; }
-            if path.file_name().and_then(|s| s.to_str()) == Some(DEFAULT_MERGED_FILENAME) {
-                continue;
-            }
-            if path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase() != "csv" {
-                continue;
-            }
+            if path.file_name().and_then(|s| s.to_str()) == Some(DEFAULT_SINGLE_FILE) { continue; }
+            if path.extension().and_then(|s| s.to_str()).unwrap_or("") != "csv" { continue; }
 
             let team_file_mtime = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
-            let newer_than_merged = match (team_file_mtime, merged_mtime) {
+            let newer = match (team_file_mtime, merged_mtime) {
                 (Some(tf), Some(mg)) => tf > mg,
                 (Some(_), None)      => true,
                 _                    => false,
             };
+            if !newer { continue; }
 
-            if !newer_than_merged { continue; }
-
-            // Guess team name from file stem (reverse-sanitize heuristic)
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            // We’ll trust the CSV instead of the filename (more robust)
             let text = fs::read_to_string(&path)?;
-            let parsed = parse_rows(&text, &Delim::Csv);
+            let parsed = parse_rows(&text, Delim::Csv);
             let (h2, rows2) = detect_headers(parsed);
-            if headers.is_none() { headers = h2; } // adopt a header if merged had none
-
-            // derive team name from first row’s col 3 if present
+            if headers.is_none() { headers = h2; }
             if let Some(first) = rows2.get(0) {
                 if first.len() > 3 {
-                    let t = first[3].clone();
-                    by_team.insert(t, rows2);
+                    by_team.insert(first[3].clone(), rows2);
                     continue;
                 }
             }
-            // fallback: use filename stem, but we don’t know exact original spacing/case
-            // Put rows under the stem as-is
-            by_team.insert(stem.to_string(), rows2);
         }
     }
 
-    // Reassemble final rows
-    let mut final_rows: Vec<Vec<String>> = Vec::new();
-    for (_team, mut rlist) in by_team {
-        final_rows.append(&mut rlist);
+    // If we still have no headers but we’re “Players”, synthesize canonical
+    if headers.is_none() {
+        headers = Some(vec![
+            "Name","Number","Race","Team","XP","TV","OVR","RN","HB","QB","GN","BK","DL","LB","CV",
+            "Spd","Str","Agl","Stm","Tck","Blk","Ddg","BrB","Hnd","Pas","Vis","Bru","Dur","Sal"
+        ].into_iter().map(|s| s.to_string()).collect());
     }
+
+    let mut final_rows = Vec::new();
+    for (_, mut rs) in by_team { final_rows.append(&mut rs); }
 
     Ok(Dataset { headers, rows: final_rows })
 }

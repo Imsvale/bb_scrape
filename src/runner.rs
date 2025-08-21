@@ -4,13 +4,12 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
+use crate::params::PLAYERS_SUBDIR;
 use crate::{
+    file,
+    params::{Params, PageKind, DEFAULT_OUT_DIR, DEFAULT_SINGLE_FILE},
     specs,
-    params::{Params, PageKind, DEFAULT_OUT_DIR, DEFAULT_MERGED_FILENAME},
-    file::{
-        append_rows, ensure_directory, normalize_dir_path,
-        resolve_team_filename, sanitize_team_filename, write_rows_start,
-    }
+    store,
 };
 
 /// Optional progress sink for GUI/CLI.
@@ -115,9 +114,9 @@ fn get_players(
 
     let mut written = Vec::with_capacity(ids.len());
 
-    let delim = &params.format;
+    let delim = params.format;
 
-    if params.all && params.per_team {
+    if !params.single_file {
         // ---------- PER-TEAM FILES ----------
         // -o must be a directory (create if missing). If omitted → "./out"
         let outdir = params
@@ -125,17 +124,26 @@ fn get_players(
             .clone()
             .unwrap_or_else(|| PathBuf::from(DEFAULT_OUT_DIR));
         // only enforce dir semantics in per-team mode
-        let outdir = normalize_dir_path(outdir.to_string_lossy().as_ref())?;
-        ensure_directory(&outdir)?;
+        let outdir = file::normalize_dir_path(outdir.to_string_lossy().as_ref())?;
+        file::ensure_directory(&outdir)?;
 
         let mut seen: HashMap<String, usize> = HashMap::new();
+        let mut persisted_headers = false;
+
         for id in ids {
             let bundle = specs::players::fetch_and_extract(id, params.keep_hash, params.include_headers)?;
-            let stem = sanitize_team_filename(&bundle.team_name, id);
-            let path = resolve_team_filename(&outdir, &stem, &mut seen);
+            let stem = file::sanitize_team_filename(&bundle.team_name, id);
+            let path = file::resolve_team_filename(&outdir, &stem, &mut seen, delim);
 
-            write_rows_start(&path, bundle.headers.as_deref(), delim)?;
-            append_rows(&path, &bundle.rows, delim)?;
+            if !persisted_headers {
+                if let Some(h) = &bundle.headers {
+                    let _ = store::save_players_headers(h);
+                    persisted_headers = true;
+                }
+            }
+
+            file::write_rows_start(&path, bundle.headers.as_deref(), delim)?;
+            file::append_rows(&path, &bundle.rows, delim)?;
             if let Some(p) = progress.as_deref_mut() {
                 p.item_done(id, &path);
             }
@@ -145,15 +153,15 @@ fn get_players(
         // ---------- MERGED SINGLE FILE ----------
         let out_hint = params.out
             .clone()
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_OUT_DIR).join(DEFAULT_MERGED_FILENAME));
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_OUT_DIR).join(PLAYERS_SUBDIR).join(DEFAULT_SINGLE_FILE));
 
         let resolved = if out_hint.is_dir() || crate::file::looks_like_dir_hint(&out_hint) {
-            ensure_directory(&out_hint)?;
-            out_hint.join(DEFAULT_MERGED_FILENAME)
+            file::ensure_directory(&out_hint)?;
+            out_hint.join(DEFAULT_SINGLE_FILE)
         } else {
             if let Some(parent) = out_hint.parent() {
                 if !parent.as_os_str().is_empty() {
-                    ensure_directory(parent)?;
+                    file::ensure_directory(parent)?;
                 }
             }
             out_hint
@@ -166,14 +174,18 @@ fn get_players(
             let bundle = specs::players::fetch_and_extract(id, params.keep_hash, params.include_headers)?;
             if !wrote_header {
                 // use site headers if present and include_headers==true
-                write_rows_start(&resolved, bundle.headers.as_deref(), delim)?;
+                file::write_rows_start(&resolved, bundle.headers.as_deref(), delim)?;
                 wrote_header = true;
+
+                if let Some(h) = &bundle.headers {
+                    let _ = store::save_players_headers(h);
+                }
             } else {
                 // ensure file exists already (write_rows_start creates/truncates only once)
                 // then append rows for subsequent teams
                 // (no-op here; just fall through)
             }
-            append_rows(&resolved, &bundle.rows, delim)?;
+            file::append_rows(&resolved, &bundle.rows, delim)?;
 
             if let Some(p) = progress.as_deref_mut() {
                 p.item_done(id, &resolved);

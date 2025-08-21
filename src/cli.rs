@@ -2,12 +2,7 @@
 use std::{env, path::PathBuf};
 
 use crate::csv::Delim;
-use crate::params::{
-    Params, 
-    PageKind,
-    DEFAULT_OUT_DIR,
-    DEFAULT_MERGED_FILENAME,
-};
+use crate::params::{ PageKind, Params };
 
 pub enum Mode {
     Cli(Params),
@@ -23,7 +18,7 @@ pub fn detect_mode() -> Result<Mode, Box<dyn std::error::Error>> {
         // only program name
         return Ok(Mode::Gui(params));
     }
-    parse_cli(&mut params);
+    parse_cli(&mut params)?;
     Ok(Mode::Cli(params))
 }
 
@@ -68,21 +63,12 @@ fn parse_cli(params: &mut Params) -> Result<(), Box<dyn std::error::Error>> {
                 };}
             "--keephash" => params.keep_hash = true,
             "--include-headers" => params.include_headers = true,
-            "--per-team" => params.per_team = true,
+            "--single" => params.single_file = true,
             "-h" | "--help" => {
                 eprintln!(include_str!("cli_help.txt"));
                 std::process::exit(0);
             }
             _ => return Err(format!("Unknown arg: {}", a).into()),
-        }
-    }
-
-    // Default output if not given
-    if params.out.is_none() {
-        if params.per_team {
-            params.out = Some(PathBuf::from(DEFAULT_OUT_DIR)); // directory
-        } else {
-            params.out = Some(PathBuf::from(DEFAULT_OUT_DIR).join(DEFAULT_MERGED_FILENAME)); // single file
         }
     }
 

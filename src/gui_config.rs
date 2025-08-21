@@ -15,7 +15,7 @@ impl Default for GuiConfig {
             include_headers: false,
             keep_hash: false,
             per_team: false,
-            out_path: "out/players.csv".into(),
+            out_path: "NOT ACTIVE".into(),
             selected_ids: Vec::new(),
         }
     }

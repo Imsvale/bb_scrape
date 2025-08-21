@@ -1,13 +1,17 @@
 // src/csv.rs
 use std::io::{self, Write};
 
-#[derive(Clone)]
+/// Output delimiter
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Delim {
     Csv, // comma
     Tsv, // tab
 }
 
-pub fn parse_rows(text: &str, delim: &Delim) -> Vec<Vec<String>> {
+/* ---------------- Parsing ---------------- */
+
+/// Minimal CSV/TSV parser (quotes + CRLF tolerant). std-only.
+pub fn parse_rows(text: &str, delim: Delim) -> Vec<Vec<String>> {
     let sep = match delim { Delim::Csv => ',', Delim::Tsv => '\t' };
     let mut rows = Vec::new();
     let mut field = String::new();
@@ -30,11 +34,13 @@ pub fn parse_rows(text: &str, delim: &Delim) -> Vec<Vec<String>> {
                 }
             }
             c if c == sep && !in_quotes => {
-                row.push(field.clone()); field.clear();
+                row.push(field.clone());
+                field.clear();
             }
             '\n' | '\r' if !in_quotes => {
                 if ch == '\r' && matches!(chars.peek(), Some('\n')) { chars.next(); }
-                row.push(field.clone()); field.clear();
+                row.push(field.clone());
+                field.clear();
                 if !row.is_empty() && !(row.len() == 1 && row[0].is_empty()) {
                     rows.push(std::mem::take(&mut row));
                 } else {
@@ -44,7 +50,7 @@ pub fn parse_rows(text: &str, delim: &Delim) -> Vec<Vec<String>> {
             _ => field.push(ch),
         }
     }
-    if in_quotes { /* tolerate trailing quote mismatch by finishing the field */ }
+    // tolerate unterminated quote by flushing the field/row
     if !in_quotes {
         row.push(field);
         if !row.is_empty() { rows.push(row); }
@@ -52,10 +58,11 @@ pub fn parse_rows(text: &str, delim: &Delim) -> Vec<Vec<String>> {
     rows
 }
 
+/// Heuristic: if the first cell is "Name" (Players page), treat first row as header.
+/// TODO: Questionable purpose
 pub fn detect_headers(mut rows: Vec<Vec<String>>) -> (Option<Vec<String>>, Vec<Vec<String>>) {
     if rows.is_empty() { return (None, rows); }
     let first = &rows[0];
-    // Simple heuristic for Players page
     if !first.is_empty() && first[0].eq_ignore_ascii_case("name") {
         let header = rows.remove(0);
         return (Some(header), rows);
@@ -63,14 +70,17 @@ pub fn detect_headers(mut rows: Vec<Vec<String>>) -> (Option<Vec<String>>, Vec<V
     (None, rows)
 }
 
-fn needs_quotes(field: &str, delim: &Delim) -> bool {
+/* ---------------- Writing ---------------- */
+
+fn needs_quotes(field: &str, delim: Delim) -> bool {
     match delim {
         Delim::Csv => field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r'),
         Delim::Tsv => field.contains('\t') || field.contains('"') || field.contains('\n') || field.contains('\r'),
     }
 }
 
-pub fn write_row<W: Write>(mut w: W, row: &[String], delim: &Delim) -> io::Result<()> {
+/// Write a single CSV/TSV row to any writer.
+pub fn write_row<W: Write>(mut w: W, row: &[String], delim: Delim) -> io::Result<()> {
     let sep = match delim { Delim::Csv => ',', Delim::Tsv => '\t' };
     let mut first = true;
     for cell in row {
@@ -85,16 +95,71 @@ pub fn write_row<W: Write>(mut w: W, row: &[String], delim: &Delim) -> io::Resul
     writeln!(w)
 }
 
-pub fn rows_to_string(rows: &[Vec<String>], headers: &Option<Vec<String>>, delim: &Delim) -> String {
-    // Build into a Vec<u8> (implements io::Write), then convert to String.
+/* ---------------- Export-time transforms (no mutation of base) ---------------- */
+
+/// Transform the Number column (index 1) according to `keep_hash` for *export only*.
+fn map_keep_hash(cell: &str, keep_hash: bool) -> String {
+    if keep_hash {
+        if cell.starts_with('#') { cell.to_string() }
+        else if cell.is_empty()  { String::new() }
+        else { format!("#{}", cell) }
+    } else {
+        cell.trim_start_matches('#').to_string()
+    }
+}
+
+/// Build one output row from a base row, applying export-time toggles.
+pub fn build_export_row(base_row: &[String], keep_hash: bool) -> Vec<String> {
+    if base_row.len() <= 1 {
+        return base_row.to_owned();
+    }
+    let mut out = base_row.to_owned();
+    out[1] = map_keep_hash(&out[1], keep_hash);
+    out
+}
+
+/// Create a full export string (Copy/Export) from base data and toggles.
+/// - `headers`: base headers (if any)
+/// - `rows`: base rows (assumed to have '#' in Number column)
+/// - `include_headers`: whether to emit a header line
+/// - `keep_hash`: whether to keep '#' in Number column for export
+/// - `delim`: CSV or TSV
+pub fn to_export_string(
+    headers: &Option<Vec<String>>,
+    rows: &[Vec<String>], // <-- Fix'd
+    include_headers: bool,
+    keep_hash: bool,
+    delim: Delim,
+) -> String {
+    let mut buf: Vec<u8> = Vec::new();
+
+    if include_headers {
+        if let Some(h) = headers {
+            let _ = write_row(&mut buf, h, delim);
+        }
+    }
+    for r in rows {
+        let mapped = build_export_row(r, keep_hash);
+        let _ = write_row(&mut buf, &mapped, delim);
+    }
+
+    match String::from_utf8(buf) {
+        Ok(s) => s,
+        Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
+    }
+}
+
+/* ---------------- Convenience: stringify rows as-is (no transforms) ---------------- */
+
+/// If you still need to stringify rows as-is for preview/debug.
+pub fn rows_to_string(rows: &[Vec<String>], headers: &Option<Vec<String>>, delim: Delim) -> String {
     let mut buf: Vec<u8> = Vec::new();
 
     if let Some(h) = headers {
-        // Writing to Vec<u8> is infallible; unwrap() is fine.
-        write_row(&mut buf, h, delim).unwrap();
+        let _ = write_row(&mut buf, h, delim);
     }
     for r in rows {
-        write_row(&mut buf, r, delim).unwrap();
+        let _ = write_row(&mut buf, r, delim);
     }
 
     match String::from_utf8(buf) {
