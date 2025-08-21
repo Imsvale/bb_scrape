@@ -21,7 +21,7 @@ pub fn load() -> Result<Vec<(u32, String)>, Box<dyn Error>> {
     // fallback to live fetch
     let teams = fetch_all()?;
     // write cache
-    let mut buf = String::new();
+    let mut buf = s!();
     for (id, name) in &teams {
         buf.push_str(&format!("{},{}\n", id, name));
     }
@@ -52,7 +52,7 @@ fn fetch_all() -> Result<Vec<(u32, String)>, Box<dyn Error>> {
     while let Some(pos) = rest.find(needle) {
         rest = &rest[pos + needle.len()..];
 
-        let mut id_str = String::new();
+        let mut id_str = s!();
         for c in rest.chars() {
             if c.is_ascii_digit() {
                 id_str.push(c);

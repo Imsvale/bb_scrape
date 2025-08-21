@@ -144,7 +144,7 @@ fn split_first_cell(fused: &str, keep_hash: bool) -> (String, String, String) {
 
         (name, num, race)
     } else {
-        (fused.trim().to_string(), String::new(), String::new())
+        (fused.trim().to_string(), s!(), s!())
     }
 }
 

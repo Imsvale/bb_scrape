@@ -14,7 +14,7 @@ pub fn next_tag_block_ci(s: &str, o: &str, c: &str, from: usize) -> Option<(usiz
 }
 pub fn inner_after_open_tag(block: &str) -> String {
     if let Some(oe)=block.find('>'){ if let Some(cs)=block.rfind('<'){ if cs>oe { return block[oe+1..cs].to_string(); } } }
-    String::new()
+    s!()
 }
 pub fn strip_tags(s: String) -> String {
     let mut out=String::with_capacity(s.len()); let mut in_tag=false;

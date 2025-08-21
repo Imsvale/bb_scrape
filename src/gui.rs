@@ -1,5 +1,4 @@
 // src/gui.rs
-#![allow(unused)]
 use std::{
     error::Error,
     path::PathBuf, 

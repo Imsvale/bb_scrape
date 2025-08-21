@@ -1,5 +1,4 @@
 // src/runner.rs
-#![allow(unused)]
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};

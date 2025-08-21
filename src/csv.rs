@@ -14,7 +14,7 @@ pub enum Delim {
 pub fn parse_rows(text: &str, delim: Delim) -> Vec<Vec<String>> {
     let sep = match delim { Delim::Csv => ',', Delim::Tsv => '\t' };
     let mut rows = Vec::new();
-    let mut field = String::new();
+    let mut field = s!();
     let mut row = Vec::new();
     let mut in_quotes = false;
     let mut chars = text.chars().peekable();
@@ -101,7 +101,7 @@ pub fn write_row<W: Write>(mut w: W, row: &[String], delim: Delim) -> io::Result
 fn map_keep_hash(cell: &str, keep_hash: bool) -> String {
     if keep_hash {
         if cell.starts_with('#') { cell.to_string() }
-        else if cell.is_empty()  { String::new() }
+        else if cell.is_empty()  { s!() }
         else { format!("#{}", cell) }
     } else {
         cell.trim_start_matches('#').to_string()

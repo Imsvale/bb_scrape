@@ -51,7 +51,7 @@ pub fn load(path: &str) -> GuiConfig {
 }
 
 pub fn save(path: &str, cfg: &GuiConfig) {
-    let mut s = String::new();
+    let mut s = s!();
     s.push_str(&format!("include_headers={}\n", if cfg.include_headers {1}else{0}));
     s.push_str(&format!("keep_hash={}\n", if cfg.keep_hash {1}else{0}));
     s.push_str(&format!("per_team={}\n", if cfg.per_team {1}else{0}));
