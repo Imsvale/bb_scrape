@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    config::consts::{ WORKERS, REQUEST_PAUSE_MS },
+    config::consts::{ WORKERS, REQUEST_PAUSE_MS, JITTER_MS },
     specs, teams, progress::Progress, store::{ self, DataSet },
     config::options::{PageKind::*, ScrapeOptions, TeamSelector},
 };
@@ -106,7 +106,8 @@ pub fn collect_players(
                         Err(e) => Err((team_id, e.to_string())),
                     };
                     let _ = tx.send(result);
-                    thread::sleep(Duration::from_millis(REQUEST_PAUSE_MS)); // be polite
+                    let jitter = (team_id as u64) % JITTER_MS;
+                    thread::sleep(Duration::from_millis(REQUEST_PAUSE_MS + jitter)); // be polite
                 }
             }
         );

@@ -16,3 +16,4 @@ pub const DEFAULT_FILE: &str = "all";
 // Concurrency
 pub const WORKERS: usize = 4;
 pub const REQUEST_PAUSE_MS: u64 = 75; // be polite
+pub const JITTER_MS: u64 = 50; // extra 0..50 ms
