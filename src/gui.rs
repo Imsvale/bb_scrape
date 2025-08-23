@@ -303,7 +303,9 @@ impl eframe::App for App {
                 let single_resp = ui.checkbox(&mut single, "All teams in one file");
 
                 ui.label("Output:");
-                let resp = ui.text_edit_singleline(&mut self.out_path_text);
+                
+                let resp = ui.add(egui::TextEdit::singleline(&mut self.out_path_text).font(egui::TextStyle::Monospace));
+
                 if resp.changed() {
                     self.out_path_dirty = true;
                 }
