@@ -7,7 +7,6 @@ use crate::core::html::{slice_between_ci, next_tag_block_ci, inner_after_open_ta
 use crate::core::sanitize::{normalize_entities, normalize_ws};
 
 pub struct RosterBundle {
-    pub team_name: String,
     pub headers: Option<Vec<String>>,
     pub rows: Vec<Vec<String>>,
 }
@@ -87,7 +86,7 @@ pub fn fetch_and_extract(
         rows_out.push(row);
     }
 
-    Ok(RosterBundle { team_name, headers, rows: rows_out })
+    Ok(RosterBundle { headers, rows: rows_out })
 }
 
 /* ---------- helpers ---------- */
