@@ -14,8 +14,6 @@ pub struct RosterBundle {
 
 pub fn fetch_and_extract(
     team_id: u32,
-    keep_hash: bool,
-    include_headers: bool,
 ) -> Result<RosterBundle, Box<dyn Error>> {
     let path = format!("team.php?i={}", team_id);
     let html_doc = net::http_get(&path)?; // see core/net.rs
@@ -26,11 +24,19 @@ pub fn fetch_and_extract(
 
     // Headers (<th> not necessarily wrapped in <tr>)
     let site_headers = read_site_headers_row(table);
-    let headers = if include_headers {
-        let mut hdr = vec!["Name".to_string(), "Number".to_string(), "Race".to_string(), "Team".to_string()];
+
+    // Always construct headers: Name, Number, Race, Team, then the site's tail
+    let headers = {
+        let mut hdr = vec![
+            s!("Name"), 
+            s!("Number"), 
+            s!("Race"), 
+            s!("Team")
+        ];
+
         if !site_headers.is_empty() {
-            // Drop fused "Player" header if present
-            let tail = if !site_headers.is_empty() && site_headers[0].to_ascii_lowercase().contains("name") {
+            // If the first site header already says "Name", drop it to avoid duplicates
+            let tail = if site_headers[0].to_ascii_lowercase().contains("name") {
                 site_headers.iter().skip(1).cloned().collect::<Vec<_>>()
             } else {
                 site_headers.clone()
@@ -38,7 +44,7 @@ pub fn fetch_and_extract(
             hdr.extend(tail);
         }
         Some(hdr)
-    } else { None };
+    };
 
     // Player rows
     let mut rows_out = Vec::new();
@@ -67,11 +73,11 @@ pub fn fetch_and_extract(
 
         // First cell: fused Name #Num Race, with possible [META]
         let fused = remove_bracket_tags(&cells.remove(0));
-        let (mut name, num, mut race) = split_first_cell(&fused, keep_hash);
+        let (mut name, num, mut race) = split_first_cell(&fused);
         name = normalize_ws(&name);
         race = normalize_ws(&race);
 
-        // Row: Name, Number, Race, Team, rest...
+        // Row: Name, #Number, Race, Team, rest...
         let mut row = Vec::with_capacity(4 + cells.len());
         row.push(name);
         row.push(num);
@@ -127,20 +133,13 @@ fn read_site_headers_row(table_inner: &str) -> Vec<String> {
 }
 
 /// "Name #27 Common Drakon" → ("Name", "27" or "#27", "Common Drakon")
-fn split_first_cell(fused: &str, keep_hash: bool) -> (String, String, String) {
+fn split_first_cell(fused: &str) -> (String, String, String) {
     if let Some(hidx) = fused.find('#') {
-        let name = fused[..hidx].trim().to_string();
+        let name = s!(fused[..hidx].trim());
         let rest = fused[hidx..].trim(); // starts with '#'
         let mut parts = rest.splitn(2, ' ');
-        let raw_num = parts.next().unwrap_or(""); // "#27" or similar
-        let race = parts.next().unwrap_or("").trim().to_string();
-
-        // Keep or strip the hash according to flag
-        let num = if keep_hash {
-            raw_num.to_string()
-        } else {
-            raw_num.trim_start_matches('#').to_string()
-        };
+        let num = s!(parts.next().unwrap_or("")); // "#27" or similar
+        let race = s!(parts.next().unwrap_or("").trim());
 
         (name, num, race)
     } else {

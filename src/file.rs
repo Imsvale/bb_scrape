@@ -29,7 +29,7 @@ pub fn write_rows_start(
     Ok(())
 }
 
-/// Append multiple rows to an existing CSV file (must be created already).
+/// Append multiple rows to an existing CSV/TSV file (must be created already).
 pub fn append_rows(
     path: &Path, 
     rows: &[Vec<String>],
@@ -84,17 +84,21 @@ pub fn sanitize_team_filename(name: &str, id: u32) -> String {
 /// Duplicate handling **only within this run**
 pub fn resolve_team_filename(
     dir: &Path,
-    team_name: &str,
+    stem: &str,                        // already sanitized, no extension
     seen_names: &mut HashMap<String, usize>,
-    sep: char,
+    ext: &str,                         // "csv" | "tsv" | ...
 ) -> PathBuf {
+    // How many times have we seen this base?
+    let count = seen_names.entry(stem.to_string()).or_insert(0);
 
-    let count = seen_names.entry(team_name.to_string()).or_insert(0);
+    // First occurrence: "<stem>.ext"
+    // Subsequent:       "<stem> (N).ext" with N starting at 2
     let filename = if *count == 0 {
-        format!("{team_name}.{ext}", )
+        format!("{stem}.{ext}")
     } else {
-        format!("{team_name} ({}).{ext}", *count + 1)
+        format!("{stem} ({}).{ext}", *count + 1)
     };
+
     *count += 1;
     dir.join(filename)
 }

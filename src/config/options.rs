@@ -1,4 +1,5 @@
 // src/config/app_options.rs
+use std::ffi::OsString;
 use std::path::{ Path, PathBuf };
 use super::consts::*;
 
@@ -69,21 +70,7 @@ impl ExportFormat {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OutputPath {
-    dir: String,
-    file_stem: String, // without extension
-}
 
-impl Default for OutputPath {
-    fn default() -> Self {
-        Self {
-            // TODO: (maybe) PathBuf instead of String
-            dir: join!(DEFAULT_OUT_DIR, "/", DEFAULT_PLAYERS_SUBDIR),
-            file_stem: s!(DEFAULT_FILE),
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportOptions {
@@ -106,46 +93,42 @@ impl Default for ExportOptions {
     }
 }
 
-enum Char {
-    Comma,
-}
-
 impl ExportOptions {
     pub fn out_path(&self) -> PathBuf {
-        let o = &self.out_path;
-
-        let dir = &self.out_path.dir;
-        let file = &self.out_path.file_stem;
-        let ext = self.format.ext();
-
-        let mut path = PathBuf::from(dir);
+        let mut path = self.out_path.dir.clone();
 
         match self.export_type {
-            ExportType::SingleFile => path.push(join!(file, ".", ext)),
-            ExportType::PerTeam => (),
+            ExportType::SingleFile => {
+                // join "<stem>.<ext>" – keep using your macro
+                let stem = self
+                    .out_path
+                    .file_stem
+                    .to_string_lossy();
+                let ext = self.format.ext();
+                path.push(join!(stem, ".", ext));
+            },
+            ExportType::PerTeam => { /* directory only */},
         }
         path
     }
 
+    /// Parse GUI text into dir + stem. Ignores pasted extension; format controls it.
     pub fn set_path(&mut self, text: &str) {
-        // TODO: (maybe) Use Path/PathBuf instead of String?
         let s = text.trim();
 
         match self.export_type {
             ExportType::SingleFile => {
                 let p = Path::new(s);
                 if let Some(parent) = p.parent() {
-                    self.out_path.dir = parent.to_string_lossy().into();
-                } else {
-                    // No parent given; leave dir as-is.
+                    self.out_path.dir = parent.to_path_buf();
                 }
                 if let Some(stem) = p.file_stem() {
-                    self.out_path.file_stem = stem.to_string_lossy().into();
+                    self.out_path.file_stem = stem.to_os_string();
                 }
                 // Ignore pasted extension; format controls it.
             }
             ExportType::PerTeam => {
-                self.out_path.dir = s!(s);
+                self.out_path.dir = PathBuf::from(s);
             }
         }
     }
@@ -154,6 +137,21 @@ impl ExportOptions {
         match self.format {
             ExportFormat::Csv => ',',
             ExportFormat::Tsv => '\t',
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputPath {
+    dir: PathBuf,
+    file_stem: OsString, // without extension
+}
+
+impl Default for OutputPath {
+    fn default() -> Self {
+        Self {
+            dir: PathBuf::from(join!(DEFAULT_OUT_DIR, "/", DEFAULT_PLAYERS_SUBDIR)),
+            file_stem: OsString::from(DEFAULT_FILE),
         }
     }
 }

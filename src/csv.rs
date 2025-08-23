@@ -1,5 +1,6 @@
 // src/csv.rs
 use std::io::{self, Write};
+use std::mem::take;
 
 /* ---------------- Parsing ---------------- */
 
@@ -26,15 +27,14 @@ pub fn parse_rows(text: &str, sep: char) -> Vec<Vec<String>> {
                 }
             }
             c if c == sep && !in_quotes => {
-                row.push(field.clone());
-                field.clear();
+                // move the field without cloning
+                row.push(take(&mut field));
             }
             '\n' | '\r' if !in_quotes => {
                 if ch == '\r' && matches!(chars.peek(), Some('\n')) { chars.next(); }
-                row.push(field.clone());
-                field.clear();
+                row.push(take(&mut field));
                 if !row.is_empty() && !(row.len() == 1 && row[0].is_empty()) {
-                    rows.push(std::mem::take(&mut row));
+                    rows.push(take(&mut row));
                 } else {
                     row.clear();
                 }
@@ -42,11 +42,13 @@ pub fn parse_rows(text: &str, sep: char) -> Vec<Vec<String>> {
             _ => field.push(ch),
         }
     }
-    // tolerate unterminated quote by flushing the field/row
-    if !in_quotes {
-        row.push(field);
-        if !row.is_empty() { rows.push(row); }
+
+    // Flush any trailing field/row even if quotes were unterminated.
+    row.push(field);
+    if !row.is_empty() {
+        rows.push(row);
     }
+
     rows
 }
 
@@ -114,7 +116,7 @@ pub fn build_export_row(base_row: &[String], keep_hash: bool) -> Vec<String> {
 /// - `sep`: character to be used as field/cell separator
 pub fn to_export_string(
     headers: &Option<Vec<String>>,
-    rows: &[Vec<String>], // <-- Fix'd
+    rows: &[Vec<String>],
     include_headers: bool,
     keep_hash: bool,
     sep: char,
@@ -139,7 +141,6 @@ pub fn to_export_string(
 
 /* ---------------- Convenience: stringify rows as-is (no transforms) ---------------- */
 
-/// If you still need to stringify rows as-is for preview/debug.
 pub fn rows_to_string(rows: &[Vec<String>], headers: &Option<Vec<String>>, sep: char) -> String {
     let mut buf: Vec<u8> = Vec::new();
 
