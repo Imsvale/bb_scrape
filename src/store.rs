@@ -17,7 +17,7 @@ pub struct Dataset {
 
 // We keep store files separate from export files:
 //   <DEFAULT_OUT_DIR>/data/<page>.csv
-const STORE_SUBDIR: &str = "data";
+const STORE_SUBDIR: &str = ".store";
 const STORE_SEP: char = ','; // raw cache always stored as CSV
 
 fn store_dir() -> PathBuf {
