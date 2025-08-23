@@ -107,13 +107,10 @@ impl App {
         }
     }
 
-    /* ---------- Output field <-> ExportOptions mapping ---------- */
-
     fn set_selection_message(&self) {
-        *self.status.lock().unwrap() = "Selection changed — not scraped yet.".to_string();
+        let n = self.state.lock().unwrap().gui.selected_team_ids.len();
+        *self.status.lock().unwrap() = format!("Selection: {} team(s) — not scraped yet", n);
     }
-
-    /* ---------- Scrape/Export hooks ---------- */
 
     fn recollect(&mut self, ctx: &egui::Context) {
         if self.running {
@@ -173,7 +170,7 @@ impl eframe::App for App {
         /* ---------------- Tabs (stub) ---------------- */
         egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_label(true, "Players"); // single page for now
+                let _ = ui.selectable_label(true, "Players"); // single page for now
             });
         });
 
@@ -337,66 +334,76 @@ impl eframe::App for App {
                 // ################
                 if ui.button("Copy").clicked() {
 
-                    let st = self.state.lock().unwrap().clone();
-                    let export = &st.options.export;
+                    if self.rows.is_empty() {
+                        *self.status.lock().unwrap() = s!("Nothing to copy");
+                    } else {
 
-                    let txt = to_export_string(
-                        &self.headers,
-                        &self.rows,
-                        export.include_headers,
-                        export.keep_hash,
-                        export.delimiter().unwrap(), // Option(char) from ExportOptions
-                    );
-                    ctx.copy_text(txt);
-                    *self.status.lock().unwrap() = "Copied to clipboard".to_string();
+                        let st = self.state.lock().unwrap().clone();
+                        let export = &st.options.export;
+
+                        let txt = to_export_string(
+                            &self.headers,
+                            &self.rows,
+                            export.include_headers,
+                            export.keep_hash,
+                            export.delimiter().unwrap(), // Option(char) from ExportOptions
+                        );
+                        ctx.copy_text(txt);
+                        *self.status.lock().unwrap() = "Copied to clipboard".to_string();
+                    }
                 }
                 // ##################
                 // # Button: Export #
                 // ##################
                 if ui.button("Export").clicked() {
-                    // Push Output text → ExportOptions if dirty
-                    {
-                        let mut st = self.state.lock().unwrap();
-                        let export = &mut st.options.export;
 
-                        if self.out_path_dirty {
-                            export.set_path(&self.out_path_text);
-                            self.out_path_dirty = false;
-                        }
-                    }
+                    if self.rows.is_empty() {
+                        *self.status.lock().unwrap() = s!("Nothing to export");
+                    } else {
+                        // Push Output text → ExportOptions if dirty
+                        {
+                            let mut st = self.state.lock().unwrap();
+                            let export = &mut st.options.export;
 
-                    // Snapshot for IO
-                    let st = self.state.lock().unwrap().clone();
-                    let export = st.options.export;
-
-                    let res: Result<Vec<PathBuf>, Box<dyn Error>> = match export.export_type {
-
-                        ExportType::SingleFile => file::write_export_single(
-                            &export, 
-                            &self.headers, 
-                            &self.rows
-                        )
-                        .map(|p| vec![p] ),
-
-                        ExportType::PerTeam => file::write_export_per_team(
-                            &export, 
-                            &self.headers, 
-                            &self.rows, 
-                            3, // "Team" column
-                        )
-                    };
-
-                    match res {
-                        Ok(paths) => {
-                            if let Some(last) = paths.last() {
-                                *self.status.lock().unwrap() =
-                                    format!("Exported {} file(s), e.g. {}", paths.len(), last.display());
-                            } else {
-                                *self.status.lock().unwrap() = "Export done".to_string();
+                            if self.out_path_dirty {
+                                export.set_path(&self.out_path_text);
+                                self.out_path_dirty = false;
                             }
                         }
-                        Err(e) => {
-                            *self.status.lock().unwrap() = format!("Export error: {}", e);
+
+                        // Snapshot for IO
+                        let st = self.state.lock().unwrap().clone();
+                        let export = st.options.export;
+
+                        let res: Result<Vec<PathBuf>, Box<dyn Error>> = match export.export_type {
+
+                            ExportType::SingleFile => file::write_export_single(
+                                &export, 
+                                &self.headers, 
+                                &self.rows
+                            )
+                            .map(|p| vec![p] ),
+
+                            ExportType::PerTeam => file::write_export_per_team(
+                                &export, 
+                                &self.headers, 
+                                &self.rows, 
+                                3, // "Team" column
+                            )
+                        };
+
+                        match res {
+                            Ok(paths) => {
+                                if let Some(last) = paths.last() {
+                                    *self.status.lock().unwrap() =
+                                        format!("Exported {} file(s), e.g. {}", paths.len(), last.display());
+                                } else {
+                                    *self.status.lock().unwrap() = "Export done".to_string();
+                                }
+                            }
+                            Err(e) => {
+                                *self.status.lock().unwrap() = format!("Export error: {}", e);
+                            }
                         }
                     }
                 }
