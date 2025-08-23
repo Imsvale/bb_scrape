@@ -1,95 +1,79 @@
 // src/store.rs
-use std::{fs, io, path::{PathBuf}, time::SystemTime, collections::HashMap};
-use crate::csv::{self, parse_rows, detect_headers};
+use std::{
+    fs::{self, File},
+    io::{self, BufWriter},
+    path::PathBuf,
+};
 
-pub struct Dataset { pub headers: Option<Vec<String>>, pub rows: Vec<Vec<String>> }
+use crate::csv::{parse_rows, write_row};
+use crate::config::consts::DEFAULT_OUT_DIR;
+use crate::config::options::PageKind;
 
-pub fn save_players_headers(headers: &[String]) -> io::Result<()> {
-    let p = headers_path();
-
-    // Ensure parent directories exist
-    if let Some(parent) = p.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
-        }
-    }
-
-    let file = fs::File::create(&p)?; // Use the computed path here
-    let mut writer = io::BufWriter::new(file);
-    csv::write_row(&mut writer, headers, Delim::Csv)?;
-
-    Ok(())
+#[derive(Clone, Debug)]
+pub struct Dataset {
+    pub headers: Option<Vec<String>>,
+    pub rows: Vec<Vec<String>>,
 }
 
-pub fn load_players_headers() -> Option<Vec<String>> {
-    let p = headers_path();
-    let txt = fs::read_to_string(p).ok()?;
-    let rows = parse_rows(&txt, Delim::Csv);
-    rows.into_iter().next()
+// We keep store files separate from export files:
+//   <DEFAULT_OUT_DIR>/data/<page>.csv
+const STORE_SUBDIR: &str = "data";
+const STORE_SEP: char = ','; // raw cache always stored as CSV
+
+fn store_dir() -> PathBuf {
+    PathBuf::from(DEFAULT_OUT_DIR).join(STORE_SUBDIR)
 }
 
-pub fn load_players_local() -> Result<Dataset, Box<dyn std::error::Error>> {
-    let dir = PathBuf::from(DEFAULT_OUT_DIR).join(PLAYERS_SUBDIR);
-    let merged_path = dir.join(DEFAULT_SINGLE_FILE);
+fn page_filename(kind: &PageKind) -> &'static str {
+    match kind {
+        PageKind::Players => "players.csv",
+        // TODO: when you add more pages, list them here:
+        // PageKind::SeasonStats => "season_stats.csv",
+        // PageKind::CareerStats => "career_stats.csv",
+        // PageKind::Injuries    => "injuries.csv",
+        // PageKind::GameResults => "game_results.csv",
+    }
+}
 
-    let mut headers = load_players_headers();
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut merged_mtime: Option<SystemTime> = None;
+fn store_path(kind: &PageKind) -> PathBuf {
+    store_dir().join(page_filename(kind))
+}
 
-    if merged_path.exists() {
-        let text = fs::read_to_string(&merged_path)?;
-        let parsed = parse_rows(&text, Delim::Csv);
-        let (h, r) = detect_headers(parsed);
-        if headers.is_none() { headers = h; }
-        rows = r;
-        merged_mtime = fs::metadata(&merged_path).ok().and_then(|m| m.modified().ok());
+/// Persist a canonical dataset for a given page.
+/// Always writes headers first (if present), then rows.
+pub fn save_dataset(kind: &PageKind, ds: &Dataset) -> io::Result<PathBuf> {
+    let dir = store_dir();
+    if !dir.exists() {
+        fs::create_dir_all(&dir)?;
     }
 
-    let mut by_team: HashMap<String, Vec<Vec<String>>> = HashMap::new();
-    for row in rows.drain(..) {
-        if row.len() > 3 {
-            by_team.entry(row[3].clone()).or_default().push(row);
-        }
+    let path = store_path(kind);
+    let file = File::create(&path)?;
+    let mut w = BufWriter::new(file);
+
+    if let Some(h) = &ds.headers {
+        write_row(&mut w, h, STORE_SEP)?;
     }
-
-    if dir.exists() {
-        for entry in fs::read_dir(&dir)? {
-            let path = entry?.path();
-            if !path.is_file() { continue; }
-            if path.file_name().and_then(|s| s.to_str()) == Some(DEFAULT_SINGLE_FILE) { continue; }
-            if path.extension().and_then(|s| s.to_str()).unwrap_or("") != "csv" { continue; }
-
-            let team_file_mtime = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
-            let newer = match (team_file_mtime, merged_mtime) {
-                (Some(tf), Some(mg)) => tf > mg,
-                (Some(_), None)      => true,
-                _                    => false,
-            };
-            if !newer { continue; }
-
-            let text = fs::read_to_string(&path)?;
-            let parsed = parse_rows(&text, Delim::Csv);
-            let (h2, rows2) = detect_headers(parsed);
-            if headers.is_none() { headers = h2; }
-            if let Some(first) = rows2.get(0) {
-                if first.len() > 3 {
-                    by_team.insert(first[3].clone(), rows2);
-                    continue;
-                }
-            }
-        }
+    for r in &ds.rows {
+        write_row(&mut w, r, STORE_SEP)?;
     }
+    // BufWriter drops will flush; explicit flush not required
 
-    // If we still have no headers but we’re “Players”, synthesize canonical
-    if headers.is_none() {
-        headers = Some(vec![
-            "Name","Number","Race","Team","XP","TV","OVR","RN","HB","QB","GN","BK","DL","LB","CV",
-            "Spd","Str","Agl","Stm","Tck","Blk","Ddg","BrB","Hnd","Pas","Vis","Bru","Dur","Sal"
-        ].into_iter().map(|s| s.to_string()).collect());
-    }
+    Ok(path)
+}
 
-    let mut final_rows = Vec::new();
-    for (_, mut rs) in by_team { final_rows.append(&mut rs); }
+/// Load cached dataset for a given page (if present).
+/// Assumes first row is headers when present.
+pub fn load_dataset(kind: &PageKind) -> io::Result<Dataset> {
+    let path = store_path(kind);
+    let text = fs::read_to_string(&path)?;
+    let mut rows = parse_rows(&text, STORE_SEP);
 
-    Ok(Dataset { headers, rows: final_rows })
+    let headers = if !rows.is_empty() {
+        Some(rows.remove(0))
+    } else {
+        None
+    };
+
+    Ok(Dataset { headers, rows })
 }

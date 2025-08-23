@@ -1,7 +1,7 @@
 // src/gui.rs
 use std::{
     error::Error,
-    path::{ Path, PathBuf },
+    path::{ PathBuf },
     sync::{ Arc, Mutex },
     thread,
 };
@@ -12,11 +12,12 @@ use egui_extras::{ Column, TableBuilder };
 
 use crate::{
     config::{
-        options::{ AppOptions, ExportFormat, ExportType },
+        options::{ ExportFormat, ExportType, PageKind },
         state::{ AppState, GuiState },
     },
-    csv::{ rows_to_string, to_export_string },
-    runner::{ self, Progress },
+    csv::{ to_export_string },
+    file,
+    scrape,
     store,
     teams,
 };
@@ -59,7 +60,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(app_state: AppState) -> Self {
+    pub fn new(mut state: AppState) -> Self {
 
         // Teams list (fallback to 0..31 if file missing)
         let teams = match teams::load() {
@@ -68,7 +69,7 @@ impl App {
         };
 
         // Default selection: all
-        app_state.gui = GuiState {
+        state.gui = GuiState {
             selected_team_ids: teams.iter().map(|(id, _)| *id).collect(),
             ..GuiState::default()
         };
@@ -78,7 +79,7 @@ impl App {
         let mut rows = Vec::new();
         let mut status = "Idle".to_string();
 
-        if let Ok(ds) = store::load_players_local() {
+        if let Ok(ds) = store::load_dataset(&PageKind::Players) {
             headers = ds.headers;
             rows = ds.rows;
             status = "Loaded local data".to_string();
@@ -86,7 +87,7 @@ impl App {
         rows.retain(|r| !r.is_empty() && !(r.len() == 1 && r[0].trim().is_empty()));
 
         // ExportOptions::out_path() -> PathBuf
-        let out_path_text = app_state
+        let out_path_text = state
             .options
             .export
             .out_path()
@@ -94,7 +95,7 @@ impl App {
             .into();
 
         Self {
-            state: Arc::new(Mutex::new(app_state)),
+            state: Arc::new(Mutex::new(state)),
             teams,
             last_clicked: None,
             out_path_text,
@@ -123,14 +124,12 @@ impl App {
 
         let snapshot = self.state.lock().unwrap().clone();
         let scrape = snapshot.options.scrape;
-        let export = snapshot.options.export;
         let status_arc = self.status.clone();
         let ctx2 = ctx.clone();
 
         thread::spawn(move || {
-            // New-world call: runner takes ScrapeOptions directly.
-            // Adjust as needed when runner’s exact signature lands.
-            let ds = runner::collect_players(&scrape, &export);
+            let mut prog = GuiProgress::new(status_arc.clone());
+            let ds = scrape::collect_players(&scrape, Some(&mut prog));
             let msg = match ds {
                 Ok(ds) => format!(
                     "Ready: {} rows{}",
@@ -145,18 +144,19 @@ impl App {
     }
 
     fn sync_collect(&mut self) {
+        let mut prog = GuiProgress::new(self.status.clone());
         let snapshot = self.state.lock().unwrap().clone();
         let scrape = snapshot.options.scrape;
-        let export = snapshot.options.export;
 
-        match runner::collect_players(&scrape, &export) {
+        match scrape::collect_players(&scrape, Some(&mut prog)) {
             Ok(ds) => {
                 self.headers = ds.headers;
                 self.rows = ds.rows;
 
-                if let Some(ref h) = self.headers {
-                    let _ = store::save_players_headers(h);
-                }
+                let _ = store::save_dataset(
+                    &PageKind::Players,
+                    &store::Dataset { headers: self.headers.clone(), rows: self.rows.clone() }
+                );
 
                 *self.status.lock().unwrap() = "Ready".to_string();
             }
@@ -289,9 +289,9 @@ impl eframe::App for App {
             // Export options (Single vs Per-team + Output field)
             ui.horizontal(|ui| {
                 let mut app_state = self.state.lock().unwrap();
-                let mut export = app_state.options.export;
+                let export = &mut app_state.options.export;
 
-                let before = export.export_type;
+                let before = &export.export_type;
                 let mut single = matches!(before, ExportType::SingleFile);
                 let single_resp = ui.checkbox(&mut single, "Single file");
 
@@ -318,12 +318,14 @@ impl eframe::App for App {
                 }
             });
 
-            // #######################
-            // COPY & EXPORT BUTTONS #
-            // #######################
+            // #########################
+            // # COPY & EXPORT BUTTONS #
+            // #########################
             ui.horizontal(|ui| {
 
-                // Copy
+                // ################
+                // # Button: Copy #
+                // ################
                 if ui.button("Copy").clicked() {
                     let st = self.state.lock().unwrap().clone();
                     let txt = to_export_string(
@@ -336,58 +338,45 @@ impl eframe::App for App {
                     ctx.copy_text(txt);
                     *self.status.lock().unwrap() = "Copied to clipboard".to_string();
                 }
-
-                // Export
+                // ##################
+                // # Button: Export #
+                // ##################
                 if ui.button("Export").clicked() {
                     // Push Output text → ExportOptions if dirty
                     {
                         let mut st = self.state.lock().unwrap();
                         if self.out_path_dirty {
-                            st.options.export.set_path(&self.out_path_text); // <- use model API
+                            st.options.export.set_path(&self.out_path_text);
                             self.out_path_dirty = false;
                         }
                     }
 
                     // Snapshot for IO
                     let st = self.state.lock().unwrap().clone();
+                    let export = st.options.export;
 
-                    let res: Result<runner::RunSummary, Box<dyn Error>> =
-                        if matches!(st.options.export.export_type, ExportType::SingleFile) {
-                            // Single-file: write directly here
-                            let path = st.options.export.out_path(); // PathBuf directly
+                    let res: Result<Vec<PathBuf>, Box<dyn Error>> = match export.export_type {
 
-                            if let Some(parent) = path.parent() {
-                                if !parent.as_os_str().is_empty() {
-                                    let _ = std::fs::create_dir_all(parent);
-                                }
-                            }
+                        ExportType::SingleFile => file::write_export_single(
+                            &export, 
+                            &self.headers, 
+                            &self.rows
+                        )
+                        .map(|p| vec![p] ),
 
-                            let txt = to_export_string(
-                                &self.headers,
-                                &self.rows,
-                                st.options.export.include_headers,
-                                st.options.export.keep_hash,
-                                st.options.export.delim(), // stay consistent with Copy
-                            );
-
-                            std::fs::write(&path, txt)
-                                .map(|_| runner::RunSummary { files_written: vec![path] })
-                                .map_err(|e| e.into())
-                        } else {
-                            // Per-team: delegate to runner with ExportOptions directly
-                            runner::export_per_team(
-                                &st.options.export,
-                                &self.headers,
-                                &self.rows,
-                                &self.teams,
-                            )
-                        };
+                        ExportType::PerTeam => file::write_export_per_team(
+                            &export, 
+                            &self.headers, 
+                            &self.rows, 
+                            3, // "Team" column
+                        )
+                    };
 
                     match res {
-                        Ok(sum) => {
-                            if let Some(last) = sum.files_written.last() {
+                        Ok(paths) => {
+                            if let Some(last) = paths.last() {
                                 *self.status.lock().unwrap() =
-                                    format!("Exported {} file(s), e.g. {}", sum.files_written.len(), last.display());
+                                    format!("Exported {} file(s), e.g. {}", paths.len(), last.display());
                             } else {
                                 *self.status.lock().unwrap() = "Export done".to_string();
                             }
@@ -398,7 +387,9 @@ impl eframe::App for App {
                     }
                 }
 
-                // SCRAPE (sync for now)
+                // ####################
+                // ## BUTTON: SCRAPE ##
+                // ####################
                 let red = egui::Color32::from_rgb(220, 30, 30);
                 let black = egui::Color32::BLACK;
                 if ui
@@ -501,21 +492,38 @@ fn trim_trailing_sep(s: &str) -> &str {
     s.trim_end_matches(['/', '\\'])
 }
 
-/* ---------- Progress adapter (kept; runner can accept it or ignore) ---------- */
+/* ---------- Progress adapter ---------- */
+// gui.rs (near the bottom)
+
 struct GuiProgress {
     status: Arc<Mutex<String>>,
+    done: usize,
+    total: usize,
 }
-impl runner::Progress for GuiProgress {
+
+impl GuiProgress {
+    fn new(status: Arc<Mutex<String>>) -> Self {
+        Self { status, done: 0, total: 0 }
+    }
+    fn set_status(&self, msg: impl Into<String>) {
+        *self.status.lock().unwrap() = msg.into();
+    }
+}
+
+impl crate::progress::Progress for GuiProgress {
     fn begin(&mut self, total: usize) {
-        *self.status.lock().unwrap() = format!("Starting… {} team(s)", total);
+        self.total = total;
+        self.set_status(format!("Starting… {} team(s)", total));
     }
     fn log(&mut self, msg: &str) {
-        *self.status.lock().unwrap() = msg.to_string();
+        self.set_status(msg.to_string());
     }
-    fn item_done(&mut self, team_id: u32, path: &std::path::Path) {
-        *self.status.lock().unwrap() = format!("Done team {} → {}", team_id, path.display());
+    fn item_done(&mut self, team_id: u32) {
+        self.done += 1;
+        self.set_status(format!("Fetched team {} ({}/{})", team_id, self.done, self.total));
     }
-    fn update_status(&mut self, msg: &str) {
-        *self.status.lock().unwrap() = msg.to_string();
+    fn finish(&mut self) {
+        self.set_status("Fetch complete".to_string());
     }
 }
+

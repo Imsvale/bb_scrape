@@ -7,7 +7,80 @@ use std::{
     collections::HashMap,
 };
 
-use crate::csv::write_row;
+use crate::csv::{write_row, to_export_string};
+use crate::config::options::ExportOptions;
+
+/// Write a single export file based on ExportOptions (path, headers policy, delimiter, etc.).
+/// Returns the final path written to.
+pub fn write_export_single(
+    export: &ExportOptions,
+    headers: &Option<Vec<String>>,
+    rows: &[Vec<String>],
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let path = export.out_path();
+
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            ensure_directory(parent)?;
+        }
+    }
+
+    let contents = to_export_string(
+        headers,
+        rows,
+        export.include_headers,
+        export.keep_hash,
+        export.delim(),
+    );
+
+    std::fs::write(&path, contents)?;
+    Ok(path)
+}
+
+/// Write multiple team files into the directory implied by `export.out_path()`
+/// (which must be a directory when `export.export_type == PerTeam`).
+/// `team_col` is the column index of the "Team" field in `rows` (Players = 3).
+pub fn write_export_per_team(
+    export: &ExportOptions,
+    headers: &Option<Vec<String>>,
+    rows: &[Vec<String>],
+    team_col: usize,
+) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+    // Resolve target directory and ensure it exists
+    let outdir = export.out_path();
+    ensure_directory(&outdir)?;
+
+    // Group rows by team name from the given column
+    let mut by_team: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+    for r in rows {
+        if let Some(team) = r.get(team_col) {
+            by_team.entry(team.clone()).or_default().push(r.clone());
+        }
+    }
+
+    // Dedup stems and write each file
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut written = Vec::with_capacity(by_team.len());
+    let ext = export.format.ext();
+
+    for (team_name, team_rows) in by_team {
+        let base_stem = sanitize_team_filename(&team_name, 0);
+        let path = resolve_team_filename(&outdir, &base_stem, &mut seen, ext);
+
+        let contents = to_export_string(
+            headers,
+            &team_rows,
+            export.include_headers,
+            export.keep_hash,
+            export.delim(),
+        );
+
+        std::fs::write(&path, contents)?;
+        written.push(path);
+    }
+
+    Ok(written)
+}
 
 /// Ensure parent dir exists; create/truncate file; optionally write header.
 pub fn write_rows_start(
@@ -102,3 +175,5 @@ pub fn resolve_team_filename(
     *count += 1;
     dir.join(filename)
 }
+
+

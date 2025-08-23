@@ -1,7 +1,7 @@
-// src/cli.rs
 use std::{env, path::PathBuf};
+
+use crate::config::options::{PageKind, TeamSelector, ExportType, ExportFormat};
 use crate::config::state::AppState;
-use crate::config::options::PageKind;
 
 pub enum Mode {
     Cli(AppState),
@@ -10,65 +10,128 @@ pub enum Mode {
 
 // Decide CLI vs GUI
 pub fn detect_mode() -> Result<Mode, Box<dyn std::error::Error>> {
-
     let mut app_state = AppState::default();
 
-    if std::env::args().len() == 1 {
+    if env::args().len() == 1 {
         // only program name
         return Ok(Mode::Gui(app_state));
     }
+
     parse_cli(&mut app_state)?;
     Ok(Mode::Cli(app_state))
 }
 
 pub fn run(app_state: AppState) -> Result<(), Box<dyn std::error::Error>> {
-    crate::runner::run(&app_state.options, None).map(|_| ())
-}
+    // 1) Scrape with basic CLI progress
+    let mut progress = CliProgress::default();
+    let ds = crate::scrape::run(&app_state.options.scrape, Some(&mut progress))?;
 
-fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = env::args().skip(1);
-    let mut export = app_state.options.export;
-    let mut scrape = app_state.options.scrape;
-    while let Some(a) = args.next() {
-        match a.as_str() 
-        {
-            "--page" => {
-                let v = args.next().ok_or("Missing value for --page")?;
-                scrape.page = match v.to_ascii_lowercase().as_str() {
-                    "players" => PageKind::Players,
-                    other => return Err(format!("Unknown page: {}", other).into()),
-                };}
-            "--list-teams" => app_state.options.list_teams = true,
-            "-t" | "--team" => {
-                let v: u32 = args.next().ok_or("Missing team id")?.parse()?;
-                if v >= 32 { return Err("Team id out of range (0..31)".into()); }
-                scrape.one_team = Some(v);
-                scrape.all = false; }            // override default
-            "--ids" => {
-                let v = args.next().ok_or("Missing value for --ids")?;
-                scrape.ids_filter = Some(parse_ids_list(&v)?);}
-            "-o" | "--out" => export.out_path = Some(PathBuf::from(args.next().ok_or("Missing output path")?)),
-            "--format" => {
-                let v = args.next().ok_or("Missing value for --format")?;
-                app_state.format = match v.to_ascii_lowercase().as_str() {
-                    "csv" => Delim::Csv,
-                    "tsv" => Delim::Tsv,
-                    other => return Err(format!("Unknown format: {}", other).into()),
-                };}
-            "--keephash" => app_state.keep_hash = true,
-            "--include-headers" => app_state.include_headers = true,
-            "--single" => app_state.single_file = true,
-            "-h" | "--help" => {
-                eprintln!(include_str!("cli_help.txt"));
-                std::process::exit(0);
-            }
-            _ => return Err(format!("Unknown arg: {}", a).into()),
+    // 2) Cache the canonical dataset (per page)
+    let _ = crate::store::save_dataset(&app_state.options.scrape.page, &crate::store::Dataset {
+        headers: ds.headers.clone(),
+        rows: ds.rows.clone(),
+    });
+
+    // 3) Export according to ExportOptions
+    let export = &app_state.options.export;
+    let written: Vec<PathBuf> = match export.export_type {
+        ExportType::SingleFile => {
+            crate::file::write_export_single(export, &ds.headers, &ds.rows)
+                .map(|p| vec![p])?
         }
+        ExportType::PerTeam => {
+            // Players page: "Team" column index = 3
+            crate::file::write_export_per_team(export, &ds.headers, &ds.rows, 3)?
+        }
+    };
+
+    if let Some(last) = written.last() {
+        eprintln!("Exported {} file(s), e.g. {}", written.len(), last.display());
+    } else {
+        eprintln!("Export done.");
     }
 
     Ok(())
 }
 
+fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = env::args().skip(1);
+
+    // IMPORTANT: mutate the real structs, not copies
+    let export = &mut app_state.options.export;
+    let scrape = &mut app_state.options.scrape;
+
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "-h" | "--help" => {
+                eprintln!(include_str!("cli_help.txt"));
+                std::process::exit(0);
+            }
+
+            "--list-teams" => {
+                for (id, name) in crate::scrape::list_teams() {
+                    println!("{:2}  {}", id, name);
+                }
+                std::process::exit(0);
+            }
+
+            "--page" => {
+                let v = args.next().ok_or("Missing value for --page")?;
+                scrape.page = match v.to_ascii_lowercase().as_str() {
+                    "players" => PageKind::Players,
+                    other => return Err(format!("Unknown page: {} (more pages to be implemented!)", other).into()),
+                };
+            }
+
+            "-t" | "--team" => {
+                let v: u32 = args.next().ok_or("Missing team id")?.parse()?;
+                if v >= 32 { return Err("Team id out of range (0..31)".into()); }
+                // Merge into selection: All -> One, One -> Ids, Ids -> push
+                scrape.teams = match &mut scrape.teams {
+                    TeamSelector::All => TeamSelector::One(v),
+                    TeamSelector::One(prev) => TeamSelector::Ids(vec![*prev, v]),
+                    TeamSelector::Ids(list) => { list.push(v); TeamSelector::Ids(list.clone()) }
+                };
+            }
+
+            "--ids" => {
+                let v = args.next().ok_or("Missing value for --ids")?;
+                let list = parse_ids_list(&v)?;
+                scrape.teams = TeamSelector::Ids(list);
+            }
+
+            "-o" | "--out" => {
+                let path = args.next().ok_or("Missing output path")?;
+                export.set_path(&path);
+            }
+
+            "--format" => {
+                let v = args.next().ok_or("Missing value for --format")?;
+                export.format = match v.to_ascii_lowercase().as_str() {
+                    "csv" => ExportFormat::Csv,
+                    "tsv" => ExportFormat::Tsv,
+                    other => return Err(format!("Unknown format: {}", other).into()),
+                };
+            }
+
+            "--keephash" => { export.keep_hash = true; }
+            "--include-headers" => { export.include_headers = true; }
+
+            "--single" => { export.export_type = ExportType::SingleFile; }
+            "--per-team" => { export.export_type = ExportType::PerTeam; }
+
+            _ => return Err(format!("Unknown arg: {}", a).into()),
+        }
+    }
+
+    // If we merged via multiple -t flags, ensure Ids are deduped and sorted
+    if let TeamSelector::Ids(ref mut list) = scrape.teams {
+        list.sort_unstable();
+        list.dedup();
+    }
+
+    Ok(())
+}
 
 fn parse_ids_list(s: &str) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
     let mut out = Vec::new();
@@ -90,4 +153,27 @@ fn parse_ids_list(s: &str) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
     out.sort_unstable();
     out.dedup();
     Ok(out)
+}
+
+/* ---------- CLI progress ---------- */
+
+#[derive(Default)]
+struct CliProgress {
+    done: usize,
+    total: usize,
+}
+
+impl crate::progress::Progress for CliProgress {
+    fn begin(&mut self, total: usize) {
+        self.total = total;
+        eprintln!("Fetching… {} team(s)", total);
+    }
+    fn log(&mut self, msg: &str) {
+        eprintln!("{}", msg);
+    }
+    fn item_done(&mut self, _team_id: u32) {
+        self.done += 1;
+        eprintln!("Fetched {}/{}", self.done, self.total);
+    }
+    fn finish(&mut self) {}
 }

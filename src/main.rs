@@ -1,6 +1,6 @@
 // src/main.rs
-#![allow(dead_code)]
-#![allow(unused)]
+// #![allow(dead_code)]
+// #![allow(unused)]
 
 #[macro_use]
 mod macros;
@@ -13,8 +13,8 @@ mod cli;
 mod csv;
 mod file;
 mod gui;
-
-mod runner;
+mod progress;
+mod scrape;
 mod store;
 mod teams;
 
