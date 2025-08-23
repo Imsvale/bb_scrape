@@ -150,7 +150,7 @@ pub struct OutputPath {
 impl Default for OutputPath {
     fn default() -> Self {
         Self {
-            dir: PathBuf::from(join!(DEFAULT_OUT_DIR, "/", DEFAULT_PLAYERS_SUBDIR)),
+            dir: PathBuf::from(DEFAULT_OUT_DIR).join(DEFAULT_PLAYERS_SUBDIR),
             file_stem: OsString::from(DEFAULT_FILE),
         }
     }
