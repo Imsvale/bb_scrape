@@ -12,3 +12,7 @@ pub const STORE_SEP: char = ',';
 pub const DEFAULT_OUT_DIR: &str ="out";
 pub const DEFAULT_PLAYERS_SUBDIR: &str = "players";
 pub const DEFAULT_FILE: &str = "all";
+
+// Concurrency
+pub const WORKERS: usize = 4;
+pub const REQUEST_PAUSE_MS: u64 = 75; // be polite

@@ -1,7 +1,11 @@
 // src/scrape.rs
-use std::error::Error;
+use std::{
+    error::Error, thread, time::Duration,
+    sync::{ mpsc, Arc, atomic::{ AtomicUsize, Ordering }}
+};
 
 use crate::{
+    config::consts::{ WORKERS, REQUEST_PAUSE_MS },
     specs, teams, progress::Progress, store::{ self, DataSet },
     config::options::{PageKind::*, ScrapeOptions, TeamSelector},
 };
@@ -56,6 +60,15 @@ pub fn collect_players(
     scrape: &ScrapeOptions,
     mut progress: Option<&mut dyn Progress>,
 ) -> Result<DataSet, Box<dyn Error>> {
+
+    if let Ok(bundle) = specs::teams::fetch() {
+        // cache, but ignore any IO error (best-effort)
+        let _ = store::save_dataset(
+            &Teams, 
+            &DataSet { headers: bundle.headers, rows: bundle.rows }
+        );
+    }
+
     let ids = resolve_ids(&scrape.teams);
 
     if let Some(p) = progress.as_deref_mut() {
@@ -63,26 +76,71 @@ pub fn collect_players(
         p.log("Fetching rosters…");
     }
 
-    let mut merged_headers: Option<Vec<String>> = None;
+    // Concurrency
+    type FetchOk = (u32, specs::players::RosterBundle);
+    type FetchErr = (u32, String);
+    
+    let ids_arc = Arc::new(ids.clone());
+    let counter = Arc::new(AtomicUsize::new(0));
+    let (res_tx, res_rx) = mpsc::channel::<Result<FetchOk, FetchErr>>();
+
+    let workers = WORKERS.min(ids.len()).max(1);
+
+    // Spawn workers
+
+    for _ in 0..WORKERS {
+        let ids = Arc::clone(&ids_arc);
+        let idx = Arc::clone(&counter);
+        let tx = res_tx.clone();
+
+        thread::spawn(
+            move || {
+                loop {
+                    let i = idx.fetch_add(1, Ordering::Relaxed);
+                    if i >= ids.len() {
+                        break;
+                    }
+                    let team_id = ids[i];
+                    let result = match specs::players::fetch_and_extract(team_id) {
+                        Ok(bundle) => Ok((team_id, bundle)),
+                        Err(e) => Err((team_id, e.to_string())),
+                    };
+                    let _ = tx.send(result);
+                    thread::sleep(Duration::from_millis(REQUEST_PAUSE_MS)); // be polite
+                }
+            }
+        );
+    }
+    drop(res_tx); // main thread is sole receiver now
+
+    // Aggregate results
+    let mut headers: Option<Vec<String>> = None;
     let mut rows: Vec<Vec<String>> = Vec::new();
 
-    for id in ids {
-        let bundle = specs::players::fetch_and_extract(id)?;
-        if merged_headers.is_none() {
-            merged_headers = bundle.headers.clone();
-        }
-        rows.extend(bundle.rows);
-
-        if let Some(p) = progress.as_deref_mut() {
-            p.item_done(id);
+    for _ in 0..ids_arc.len() {
+        match res_rx.recv() {
+            Ok(Ok((id, bundle))) => {
+                if headers.is_none() {
+                    headers = bundle.headers.clone();
+                }
+                rows.extend(bundle.rows);
+                if let Some(p) = progress.as_deref_mut() {
+                    p.item_done(id);
+                }
+            }
+            Ok(Err((id, msg))) => {
+                if let Some(p) = progress.as_deref_mut() {
+                    p.log(&format!("Team {id}: {msg}"));
+                }
+            }
+            Err(_) => break, // workers ended early; bail gracefully
         }
     }
 
     if let Some(p) = progress.as_deref_mut() {
         p.finish();
     }
-
-    Ok(DataSet { headers: merged_headers, rows })
+    Ok(DataSet { headers, rows })
 }
 
 /* ---------------- Team-list helper (GUI/CLI can call) ---------------- */
