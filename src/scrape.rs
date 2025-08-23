@@ -4,7 +4,7 @@ use std::error::Error;
 use crate::{
     config::options::{PageKind, ScrapeOptions, TeamSelector},
     progress::Progress,
-    specs::players,
+    specs,
 };
 
 pub struct DataSet {
@@ -18,11 +18,13 @@ pub fn run(
     progress: Option<&mut dyn Progress>,
 ) -> Result<DataSet, Box<dyn Error>> {
     match scrape.page {
-        PageKind::Players => collect_players(scrape, progress),
-        PageKind::SeasonStats => todo!(),
-        PageKind::CareerStats => todo!(),
-        PageKind::Injuries    => todo!(),
-        PageKind::GameResults => todo!(),
+        // PageKind::Teams         => collect_teams(),
+        PageKind::Teams         => collect_teams_with_progress(progress),
+        PageKind::Players       => collect_players(scrape, progress),
+        PageKind::SeasonStats   => todo!(),
+        PageKind::CareerStats   => todo!(),
+        PageKind::GameResults   => todo!(),
+        PageKind::Injuries      => todo!(),
     }
 }
 
@@ -32,6 +34,26 @@ fn resolve_ids(sel: &TeamSelector) -> Vec<u32> {
         TeamSelector::One(id) => vec![*id],
         TeamSelector::Ids(v)  => v.clone(),
     }
+}
+
+fn collect_teams() -> Result<DataSet, Box<dyn Error>> {
+    let bundle = specs::teams::fetch()?;
+    Ok(DataSet { headers: bundle.headers, rows: bundle.rows })
+}
+
+fn collect_teams_with_progress(mut progress: Option<&mut dyn Progress>)
+    -> Result<DataSet, Box<dyn Error>>
+{
+    if let Some(p) = progress.as_deref_mut() {
+        p.begin(1);
+        p.log("Fetching teams...");
+    }
+    let bundle = specs::teams::fetch()?;
+    if let Some(p) = progress.as_deref_mut() {
+        p.item_done(999_999); // or add a non-team sentinel in the trait later
+        p.finish();
+    }
+    Ok(DataSet { headers: bundle.headers, rows: bundle.rows })
 }
 
 /// Collect players into memory according to selection.
@@ -51,7 +73,7 @@ pub fn collect_players(
     let mut rows: Vec<Vec<String>> = Vec::new();
 
     for id in ids {
-        let bundle = players::fetch_and_extract(id)?;
+        let bundle = specs::players::fetch_and_extract(id)?;
         if merged_headers.is_none() {
             merged_headers = bundle.headers.clone();
         }

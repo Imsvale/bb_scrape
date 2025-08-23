@@ -18,13 +18,16 @@ impl Default for AppOptions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Something about PageKind representing the specific page on the website
+/// Each page has its own scrape Spec with details on how to extract the desired information
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageKind {
+    Teams,
     Players,
     SeasonStats, 
     CareerStats, 
-    Injuries, 
     GameResults,
+    Injuries,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

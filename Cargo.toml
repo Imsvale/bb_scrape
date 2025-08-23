@@ -2,9 +2,41 @@
 
 [package]
 name = "bb_scrape"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
+build = "src/build.rs"
+
+[build-dependencies]
+winres = "0.1"
+
+[[bin]]
+name = "bb_scrape"  # GUI-only
+path = "src/bin/gui.rs"
 
 [dependencies]
+# Use the OpenGL backend; smaller than wgpu
+#eframe = { version = "0.32", default-features = false, features = ["glow", "default_fonts"] }
 eframe = "0.32"
-egui_extras = "0.32"
+
+# Extras without auto-enabling image/svg/serde/etc.
+egui_extras = { version = "0.32", default-features = false }
+
+# Only decode PNG for the window icon (not JPEG/GIF/etc.)
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+color-eyre = { version = "0.6", optional = true }
+
+[[bin]]
+name = "bb_scrape_cli"      # CLI
+path = "src/bin/cli.rs"
+required-features = ["cli"]
+
+[features]
+cli = ["dep:color-eyre"]
+
+[profile.release]
+#lto = "thin"          # "fat" shrinks a bit more; slower compile
+#codegen-units = 1
+#panic = "abort"       # no unwinding machinery
+#opt-level = 3       # or "z" for min size; "3" if you want max perf
+#strip = "symbols"     # or "debuginfo"

@@ -1,4 +1,6 @@
-/target
+.store
+/assets
 /out
+/target
+*.exe
 *.zip
-players.csv

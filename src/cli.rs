@@ -1,7 +1,14 @@
+// src/cli.rs
 use std::{env, path::PathBuf};
 
-use crate::config::options::{PageKind, TeamSelector, ExportType, ExportFormat};
-use crate::config::state::AppState;
+use crate::{ 
+    file,
+    scrape,
+};
+use crate::config::{
+    state::AppState,
+    options::{ PageKind, TeamSelector, ExportType, ExportFormat },
+};
 
 pub enum Mode {
     Cli(AppState),
@@ -22,12 +29,16 @@ pub fn detect_mode() -> Result<Mode, Box<dyn std::error::Error>> {
 }
 
 pub fn run(app_state: AppState) -> Result<(), Box<dyn std::error::Error>> {
-    // 1) Scrape with basic CLI progress
-    let mut progress = CliProgress::default();
-    let ds = crate::scrape::run(&app_state.options.scrape, Some(&mut progress))?;
 
-    // 2) Cache the canonical dataset (per page)
-    let _ = crate::store::save_dataset(&app_state.options.scrape.page, &crate::store::Dataset {
+    let scrape = &app_state.options.scrape;
+    let options = &app_state.options;
+
+    // 1) SCRAPE
+    let mut progress = CliProgress::default();
+    let ds = scrape::run(&scrape, Some(&mut progress))?;
+
+    // 2) PAGE-SPECIFIC EXPORT DECISIONS
+    let _ = crate::store::save_dataset(&scrape.page, &crate::store::Dataset {
         headers: ds.headers.clone(),
         rows: ds.rows.clone(),
     });
@@ -36,12 +47,12 @@ pub fn run(app_state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let export = &app_state.options.export;
     let written: Vec<PathBuf> = match export.export_type {
         ExportType::SingleFile => {
-            crate::file::write_export_single(export, &ds.headers, &ds.rows)
+            file::write_export_single(options, &ds.headers, &ds.rows)
                 .map(|p| vec![p])?
         }
         ExportType::PerTeam => {
             // Players page: "Team" column index = 3
-            crate::file::write_export_per_team(export, &ds.headers, &ds.rows, 3)?
+            file::write_export_per_team(options, &ds.headers, &ds.rows, 3)?
         }
     };
 

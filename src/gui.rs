@@ -12,18 +12,18 @@ use egui_extras::{ Column, TableBuilder };
 
 use crate::{
     config::{
-        options::{ ExportFormat, ExportType, PageKind },
+        options::{ ExportFormat, 
+            ExportType::{ SingleFile, PerTeam }, 
+            PageKind },
         state::{ AppState, GuiState },
     },
-    csv::{ to_export_string },
     file,
     scrape,
     store,
     teams,
 };
 
-pub fn run(app_state: AppState) -> Result<(), Box<dyn Error>> {
-    let options = eframe::NativeOptions::default();
+pub fn run(app_state: AppState, options: eframe::NativeOptions) -> Result<(), Box<dyn Error>> {
     eframe::run_native(
         "Brutalball Scraper",
         options,
@@ -57,6 +57,8 @@ pub struct App {
     // status/progress
     status: Arc<Mutex<String>>,
     running: bool,
+
+    startup: bool,
 }
 
 impl App {
@@ -104,6 +106,7 @@ impl App {
             rows,
             status: Arc::new(Mutex::new(status)),
             running: false,
+            startup: true,
         }
     }
 
@@ -238,283 +241,302 @@ impl eframe::App for App {
         });
 
         /* -------------- Center: options + preview + actions -------------- */
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Players");
-            ui.separator();
+        egui::CentralPanel::default().show(ctx, 
+            |ui| {
+                ui.heading("Players");
+                ui.separator();
 
-            // Format selector (binds to ExportOptions)
-            let prev_fmt = {
+                // Format selector (binds to ExportOptions)
+                let prev_fmt = {
 
-                let st = self.state.lock().unwrap();
-                let export = &st.options.export;
+                    let st = self.state.lock().unwrap();
+                    let export = &st.options.export;
 
-                match export.format {
-                    ExportFormat::Csv => UiFormat::Csv,
-                    ExportFormat::Tsv => UiFormat::Tsv,
-                }
-            };
-
-            let mut fmt = prev_fmt;
-            ui.horizontal(|ui| {
-                ui.label("Format:");
-                ui.selectable_value(&mut fmt, UiFormat::Csv, "CSV");
-                ui.selectable_value(&mut fmt, UiFormat::Tsv, "TSV");
-            });
-
-            if fmt != prev_fmt {
-
-                let mut st = self.state.lock().unwrap();
-                let export = &mut st.options.export;
-                
-                export.format = match fmt {
-                    UiFormat::Csv => ExportFormat::Csv,
-                    UiFormat::Tsv => ExportFormat::Tsv,
+                    match export.format {
+                        ExportFormat::Csv => UiFormat::Csv,
+                        ExportFormat::Tsv => UiFormat::Tsv,
+                    }
                 };
 
-                if !self.out_path_dirty {
-                    self.out_path_text = st
-                        .options
-                        .export
-                        .out_path()
-                        .to_string_lossy()
-                        .into_owned();
-                }
-            }
+                let mut fmt = prev_fmt;
+                ui.horizontal(|ui| {
+                    ui.label("Format:");
+                    ui.selectable_value(&mut fmt, UiFormat::Csv, "CSV");
+                    ui.selectable_value(&mut fmt, UiFormat::Tsv, "TSV");
+                });
 
-            // Export-affecting toggles
-            {
-                let mut st = self.state.lock().unwrap();
-                let export = &mut st.options.export;
+                if fmt != prev_fmt {
 
-                ui.checkbox(&mut export.include_headers, "Include headers");
-                ui.checkbox(&mut export.keep_hash, "Keep # in player number");
-            }
-
-            // Export options (Single vs Per-team + Output field)
-            ui.horizontal(|ui| {
-                let mut app_state = self.state.lock().unwrap();
-                let export = &mut app_state.options.export;
-
-                let before = &export.export_type;
-                let mut single = matches!(before, ExportType::SingleFile);
-                let single_resp = ui.checkbox(&mut single, "All teams in one file");
-
-                ui.label("Output:");
-                
-                let resp = ui.add(egui::TextEdit::singleline(&mut self.out_path_text).font(egui::TextStyle::Monospace));
-
-                if resp.changed() {
-                    self.out_path_dirty = true;
-                }
-
-                if single_resp.changed() {
-                    export.export_type = if single { 
-                        ExportType::SingleFile 
-                    } else { 
-                        ExportType::PerTeam 
-                    };
+                    let mut st = self.state.lock().unwrap();
+                    let export = &mut st.options.export;
                     
+                    export.format = match fmt {
+                        UiFormat::Csv => ExportFormat::Csv,
+                        UiFormat::Tsv => ExportFormat::Tsv,
+                    };
+
                     if !self.out_path_dirty {
-                        // Repaint the field from the model's resolved path/dir
                         self.out_path_text = export
                             .out_path()
                             .to_string_lossy()
                             .into_owned();
                     }
                 }
-            });
 
-            // #########################
-            // # COPY & EXPORT BUTTONS #
-            // #########################
-            ui.horizontal(|ui| {
+                // Export-affecting toggles
+                {
+                    let mut st = self.state.lock().unwrap();
+                    let export = &mut st.options.export;
 
-                // ################
-                // # Button: Copy #
-                // ################
-                if ui.button("Copy").clicked() {
-
-                    if self.rows.is_empty() {
-                        *self.status.lock().unwrap() = s!("Nothing to copy");
-                    } else {
-
-                        let st = self.state.lock().unwrap().clone();
-                        let export = &st.options.export;
-
-                        let txt = to_export_string(
-                            &self.headers,
-                            &self.rows,
-                            export.include_headers,
-                            export.keep_hash,
-                            export.delimiter().unwrap(), // Option(char) from ExportOptions
-                        );
-                        ctx.copy_text(txt);
-                        *self.status.lock().unwrap() = "Copied to clipboard".to_string();
-                    }
+                    ui.checkbox(&mut export.include_headers, "Include headers");
+                    ui.checkbox(&mut export.keep_hash, "Keep # in player number");
                 }
-                // ##################
-                // # Button: Export #
-                // ##################
-                if ui.button("Export").clicked() {
 
-                    if self.rows.is_empty() {
-                        *self.status.lock().unwrap() = s!("Nothing to export");
-                    } else {
-                        // Push Output text → ExportOptions if dirty
-                        {
-                            let mut st = self.state.lock().unwrap();
-                            let export = &mut st.options.export;
+                // Export options (Single vs Per-team + Output field)
+                ui.horizontal(
+                    |ui| {
+                        let mut app_state = self.state.lock().unwrap();
+                        let options = &mut app_state.options;
+                        let export = &mut options.export;
+                        
 
-                            if self.out_path_dirty {
-                                export.set_path(&self.out_path_text);
-                                self.out_path_dirty = false;
-                            }
+                        let before = &export.export_type;
+                        let mut single = matches!(before, SingleFile);
+                        let single_resp = ui.checkbox(&mut single, "All teams in one file");
+
+                        ui.label("Output:");
+                        
+                        let resp = ui.add(egui::TextEdit::singleline(&mut self.out_path_text).font(egui::TextStyle::Monospace));
+
+                        if resp.changed() {
+                            self.out_path_dirty = true;
                         }
 
-                        // Snapshot for IO
-                        let st = self.state.lock().unwrap().clone();
-                        let export = st.options.export;
+                        if single_resp.changed() {
+                            export.export_type = if single { 
+                                SingleFile 
+                            } else { 
+                                PerTeam 
+                            };
+                            
+                            if !self.out_path_dirty {
+                                // Repaint the field from the model's resolved path/dir
+                                self.out_path_text = export
+                                    .out_path()
+                                    .to_string_lossy()
+                                    .into_owned();
+                            }
+                        }
+                    }
+                );
 
-                        let res: Result<Vec<PathBuf>, Box<dyn Error>> = match export.export_type {
+                // #########################
+                // # COPY & EXPORT BUTTONS #
+                // #########################
+                ui.horizontal(|ui| {
 
-                            ExportType::SingleFile => file::write_export_single(
-                                &export, 
-                                &self.headers, 
-                                &self.rows
-                            )
-                            .map(|p| vec![p] ),
+                    // ################
+                    // # Button: Copy #
+                    // ################
+                    if ui.button("Copy").clicked() {
 
-                            ExportType::PerTeam => file::write_export_per_team(
-                                &export, 
-                                &self.headers, 
-                                &self.rows, 
-                                3, // "Team" column
-                            )
-                        };
+                        if self.rows.is_empty() {
+                            *self.status.lock().unwrap() = s!("Nothing to copy");
+                        } else {
 
-                        match res {
-                            Ok(paths) => {
-                                if let Some(last) = paths.last() {
-                                    *self.status.lock().unwrap() =
-                                        format!("Exported {} file(s), e.g. {}", paths.len(), last.display());
-                                } else {
-                                    *self.status.lock().unwrap() = "Export done".to_string();
+                            let st = self.state.lock().unwrap().clone();
+                            let options = &st.options;
+
+                            let txt = file::to_export_string(
+                                options,
+                                &self.headers,
+                                &self.rows,
+                            );
+                            ctx.copy_text(txt);
+                            *self.status.lock().unwrap() = "Copied to clipboard".to_string();
+                        }
+                    }
+                    // ##################
+                    // # Button: Export #
+                    // ##################
+                    if ui.button("Export").clicked() {
+
+                        if self.rows.is_empty() {
+                            *self.status.lock().unwrap() = s!("Nothing to export");
+                        } else {
+                            // Push Output text → ExportOptions if dirty
+                            {
+                                let mut st = self.state.lock().unwrap();
+                                let export = &mut st.options.export;
+
+                                if self.out_path_dirty {
+                                    export.set_path(&self.out_path_text);
+                                    self.out_path_dirty = false;
                                 }
                             }
-                            Err(e) => {
-                                *self.status.lock().unwrap() = format!("Export error: {}", e);
+
+                            // Snapshot for IO
+                            let st = self.state.lock().unwrap().clone();
+                            let options = &st.options;
+                            let export = &options.export;
+
+                            let res: Result<Vec<PathBuf>, Box<dyn Error>> = match export.export_type {
+
+                                SingleFile => file::write_export_single(
+                                    &options,
+                                    &self.headers, 
+                                    &self.rows
+                                )
+                                .map(|p| vec![p] ),
+
+                                PerTeam => file::write_export_per_team(
+                                    &options, 
+                                    &self.headers, 
+                                    &self.rows, 
+                                    3, // "Team" column
+                                )
+                            };
+
+                            match res {
+                                Ok(paths) => {
+                                    if let Some(last) = paths.last() {
+                                        *self.status.lock().unwrap() =
+                                            format!("Exported {} file(s), e.g. {}", paths.len(), last.display());
+                                    } else {
+                                        *self.status.lock().unwrap() = "Export done".to_string();
+                                    }
+                                }
+                                Err(e) => {
+                                    *self.status.lock().unwrap() = format!("Export error: {}", e);
+                                }
                             }
                         }
                     }
-                }
 
-                // ####################
-                // ## BUTTON: SCRAPE ##
-                // ####################
-                let red = egui::Color32::from_rgb(220, 30, 30);
-                let black = egui::Color32::BLACK;
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("SCRAPE").color(black).strong(),
+                    // ####################
+                    // ## BUTTON: SCRAPE ##
+                    // ####################
+                    let red = egui::Color32::from_rgb(220, 30, 30);
+                    let black = egui::Color32::BLACK;
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("SCRAPE").color(black).strong(),
+                            )
+                            .fill(red),
                         )
-                        .fill(red),
-                    )
-                    .clicked()
-                {
-                    self.sync_collect();
+                        .clicked()
+                    {
+                        self.sync_collect();
+                    }
+
+                    // Status
+                    let status = self.status.lock().unwrap().clone();
+                    ui.label(format!("Status: {}", status));
+                });
+
+
+                ui.separator();
+
+                // Live table preview
+                let cols = self
+                    .headers
+                    .as_ref()
+                    .map(|h| h.len())
+                    .or_else(|| self.rows.get(0).map(|r| r.len()))
+                    .unwrap_or(0);
+
+                let mut table = TableBuilder::new(ui)
+                    .striped(true)
+                    .min_scrolled_height(0.0)
+                    .column(Column::initial(60.0).at_least(180.0).resizable(true)) // Name
+                    .column(Column::initial(30.0).at_least(30.0).resizable(true)) // Number
+                    .column(Column::initial(140.0).at_least(120.0).resizable(true)) // Race
+                    .column(Column::initial(160.0).at_least(140.0).resizable(true)); // Team
+
+                for _ in 4..cols {
+                    table = table.column(Column::initial(30.0).at_least(30.0).resizable(true));
                 }
 
-                // Status
-                let status = self.status.lock().unwrap().clone();
-                ui.label(format!("Status: {}", status));
-            });
-
-
-            ui.separator();
-
-            // Live table preview
-            let cols = self
-                .headers
-                .as_ref()
-                .map(|h| h.len())
-                .or_else(|| self.rows.get(0).map(|r| r.len()))
-                .unwrap_or(0);
-
-            let mut table = TableBuilder::new(ui)
-                .striped(true)
-                .min_scrolled_height(0.0)
-                .column(Column::auto().resizable(true).at_least(180.0)) // Name
-                .column(Column::auto().resizable(true).at_least(30.0)) // Number
-                .column(Column::auto().resizable(true).at_least(120.0)) // Race
-                .column(Column::auto().resizable(true).at_least(140.0)); // Team
-
-            for _ in 4..cols {
-                table = table.column(Column::auto().resizable(true).at_least(30.0));
-            }
-
-            table
-                .header(24.0, |mut header| {
-                    if let Some(hs) = &self.headers {
-                        for h in hs {
-                            header.col(|ui| { ui.scope(|ui| { 
-                                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                                ui.with_layout(
-                                    Layout::left_to_right(Align::Center),
-                                    |ui| { ui.label(RichText::new(h).strong()); }
-                                );
-                            }); });
-                        }
-                    } else {
-                        for i in 0..cols { 
-                            header.col(|ui| { ui.scope(|ui| { 
-                                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                                ui.with_layout(
-                                    Layout::left_to_right(Align::Center),
-                                    |ui| { ui.label(RichText::new(format!("Col {}", i + 1)).strong()); }
-                                );
-                            }); });
-                        }
-                    }
-                })
-                .body(|mut body| {
-                    body.rows(20.0, self.rows.len(), |mut row| {
-                        let row_idx = row.index();
-                        if let Some(data) = self.rows.get(row_idx) {
-                            for (ci, cell) in data.iter().enumerate() {
-                                row.col(|ui| {
-                                    ui.scope(|ui| {
-                                        ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-
-                                        let rt = RichText::new(cell);
-                                        if ci == 0 {
-                                            ui.label(rt);
-                                        } else {
-                                            ui.with_layout(
-                                                Layout::left_to_right(Align::Center),
-                                                |ui| {
-                                                    ui.label(rt);
-                                                },
-                                            );
+                table
+                    .header(24.0, 
+                        |mut header| {
+                            if let Some(hs) = &self.headers {
+                                for h in hs {
+                                    header.col(
+                                        |ui| { 
+                                            ui.scope(
+                                                |ui| { 
+                                                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                                                    ui.with_layout(
+                                                        Layout::left_to_right(Align::Center),
+                                                        |ui| { 
+                                                            ui.label(RichText::new(h).strong()); 
+                                                        }
+                                                    );
+                                                }
+                                            ); 
                                         }
-                                    });
-                                });
+                                    );
+                                }
+                            } else {
+                                for i in 0..cols { 
+                                    header.col(
+                                        |ui| { 
+                                            ui.scope(
+                                                |ui| { 
+                                                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                                                    ui.with_layout(
+                                                        Layout::left_to_right(Align::Center),
+                                                        |ui| { 
+                                                            ui.label(RichText::new(format!("Col {}", i + 1)).strong()); 
+                                                        }
+                                                    );
+                                                }
+                                            ); 
+                                        }
+                                    );
+                                }
                             }
                         }
-                    });
-                });
-        });
+                    )
+                    .body(|body| {
+                        body.rows(20.0, self.rows.len(), 
+                            |mut row| {
+                                let row_idx = row.index();
+                                if let Some(data) = self.rows.get(row_idx) {
+                                    for (ci, cell) in data.iter().enumerate() {
+                                        row.col(
+                                            |ui| {
+                                                ui.scope(
+                                                    |ui| {
+                                                        ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+
+                                                        let rt = RichText::new(cell);
+                                                        if ci == 0 {
+                                                            ui.label(rt);
+                                                        } else {
+                                                            ui.with_layout(
+                                                                Layout::left_to_right(Align::Center),
+                                                                |ui| { ui.label(rt) },
+                                                            );
+                                                        }
+                                                    }
+                                                );
+                                            }   
+                                        );
+                                    }
+                                }
+                            }
+                        );
+                    }
+                );
+            }
+        );
     }
 }
 
-/* ---------------- helpers ---------------- */
-
-fn trim_trailing_sep(s: &str) -> &str {
-    s.trim_end_matches(['/', '\\'])
-}
-
 /* ---------- Progress adapter ---------- */
-// gui.rs (near the bottom)
 
 struct GuiProgress {
     status: Arc<Mutex<String>>,
