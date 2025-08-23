@@ -98,8 +98,8 @@ impl Default for ExportOptions {
             format: ExportFormat::Csv,
             export_type: ExportType::SingleFile,
             out_path: OutputPath::default(),
-            include_headers: false,
-            keep_hash: false,
+            include_headers: true,
+            keep_hash: true,
         }
     }
 }

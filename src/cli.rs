@@ -85,7 +85,7 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
 
             "-t" | "--team" => {
                 let v: u32 = args.next().ok_or("Missing team id")?.parse()?;
-                if v >= 32 { return Err("Team id out of range (0..31)".into()); }
+                if v >= 32 { return Err("Team ID out of range (0-31)".into()); }
                 // Merge into selection: All -> One, One -> Ids, Ids -> push
                 scrape.teams = match &mut scrape.teams {
                     TeamSelector::All => TeamSelector::One(v),
@@ -114,8 +114,8 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
                 };
             }
 
-            "--keephash" => { export.keep_hash = true; }
-            "--include-headers" => { export.include_headers = true; }
+            "--nohash" => { export.keep_hash = false; }
+            "--drop-headers" => { export.include_headers = false; }
 
             "--single" => { export.export_type = ExportType::SingleFile; }
             "--per-team" => { export.export_type = ExportType::PerTeam; }
