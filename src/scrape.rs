@@ -19,10 +19,10 @@ pub fn run(
 ) -> Result<DataSet, Box<dyn Error>> {
     match scrape.page {
         PageKind::Players => collect_players(scrape, progress),
-        // PageKind::SeasonStats => todo!(),
-        // PageKind::CareerStats => todo!(),
-        // PageKind::Injuries    => todo!(),
-        // PageKind::GameResults => todo!(),
+        PageKind::SeasonStats => todo!(),
+        PageKind::CareerStats => todo!(),
+        PageKind::Injuries    => todo!(),
+        PageKind::GameResults => todo!(),
     }
 }
 

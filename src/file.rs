@@ -30,7 +30,7 @@ pub fn write_export_single(
         rows,
         export.include_headers,
         export.keep_hash,
-        export.delim(),
+        export.delimiter().unwrap(),
     );
 
     std::fs::write(&path, contents)?;
@@ -72,7 +72,7 @@ pub fn write_export_per_team(
             &team_rows,
             export.include_headers,
             export.keep_hash,
-            export.delim(),
+            export.delimiter().unwrap(),
         );
 
         std::fs::write(&path, contents)?;

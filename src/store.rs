@@ -27,11 +27,10 @@ fn store_dir() -> PathBuf {
 fn page_filename(kind: &PageKind) -> &'static str {
     match kind {
         PageKind::Players => "players.csv",
-        // TODO: when you add more pages, list them here:
-        // PageKind::SeasonStats => "season_stats.csv",
-        // PageKind::CareerStats => "career_stats.csv",
-        // PageKind::Injuries    => "injuries.csv",
-        // PageKind::GameResults => "game_results.csv",
+        PageKind::SeasonStats => "season_stats.csv",
+        PageKind::CareerStats => "career_stats.csv",
+        PageKind::Injuries    => "injuries.csv",
+        PageKind::GameResults => "game_results.csv",
     }
 }
 
