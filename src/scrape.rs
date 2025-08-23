@@ -115,7 +115,7 @@ pub fn collect_players(
 
     // Aggregate results
     let mut headers: Option<Vec<String>> = None;
-    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut per_team: Vec<(u32, Vec<Vec<String>>)> = Vec::new();
 
     for _ in 0..ids_arc.len() {
         match res_rx.recv() {
@@ -123,7 +123,7 @@ pub fn collect_players(
                 if headers.is_none() {
                     headers = bundle.headers.clone();
                 }
-                rows.extend(bundle.rows);
+                per_team.push((id, bundle.rows));
                 if let Some(p) = progress.as_deref_mut() {
                     p.item_done(id);
                 }
@@ -140,6 +140,14 @@ pub fn collect_players(
     if let Some(p) = progress.as_deref_mut() {
         p.finish();
     }
+
+    // Sort
+    per_team.sort_by_key(|(id, _)| *id);
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for (_, mut team_rows) in per_team {
+        rows.append(&mut team_rows);
+    }
+
     Ok(DataSet { headers, rows })
 }
 
