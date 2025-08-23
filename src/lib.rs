@@ -1,6 +1,6 @@
 // src/lib.rs
-// #![allow(dead_code)]
-// #![allow(unused)]
+#![allow(dead_code)]
+#![allow(unused)]
 
 #[macro_use]
 pub mod macros;

@@ -57,8 +57,6 @@ pub struct App {
     // status/progress
     status: Arc<Mutex<String>>,
     running: bool,
-
-    startup: bool,
 }
 
 impl App {
@@ -106,7 +104,6 @@ impl App {
             rows,
             status: Arc::new(Mutex::new(status)),
             running: false,
-            startup: true,
         }
     }
 
@@ -155,7 +152,7 @@ impl App {
 
                 let _ = store::save_dataset(
                     &PageKind::Players,
-                    &store::Dataset { headers: self.headers.clone(), rows: self.rows.clone() }
+                    &store::DataSet { headers: self.headers.clone(), rows: self.rows.clone() }
                 );
 
                 *self.status.lock().unwrap() = "Ready".to_string();
@@ -190,6 +187,15 @@ impl eframe::App for App {
                 if ui.button("None").clicked() {
                     self.state.lock().unwrap().gui.selected_team_ids.clear();
                     self.set_selection_message();
+                }
+
+                if ui.button("Refresh").clicked() {
+                    if self.teams[0].1 == "Vuvu Boys" { 
+                        self.teams = (0u32..32).map(|id| (id, format!("Team {}", id))).collect();
+                    } else {
+                        self.teams = teams::refresh().unwrap();
+                    }
+                    
                 }
             });
             ui.separator();

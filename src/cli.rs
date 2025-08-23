@@ -38,7 +38,7 @@ pub fn run(app_state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let ds = scrape::run(&scrape, Some(&mut progress))?;
 
     // 2) PAGE-SPECIFIC EXPORT DECISIONS
-    let _ = crate::store::save_dataset(&scrape.page, &crate::store::Dataset {
+    let _ = crate::store::save_dataset(&scrape.page, &crate::store::DataSet {
         headers: ds.headers.clone(),
         rows: ds.rows.clone(),
     });

@@ -11,7 +11,7 @@ use crate::config::consts::{STORE_DIR, STORE_SEP};
 
 /// Load cached dataset for a given page (if present).
 /// Assumes first row is headers when present.
-pub fn load_dataset(kind: &PageKind) -> Result<Dataset> {
+pub fn load_dataset(kind: &PageKind) -> Result<DataSet> {
     let path = store_path(kind);
     let text = fs::read_to_string(&path)?;
     let mut rows = parse_rows(&text, STORE_SEP);
@@ -22,12 +22,12 @@ pub fn load_dataset(kind: &PageKind) -> Result<Dataset> {
         None
     };
 
-    Ok(Dataset { headers, rows })
+    Ok(DataSet { headers, rows })
 }
 
 /// Persist a canonical dataset for a given page.
 /// Always writes headers first (if present), then rows.
-pub fn save_dataset(kind: &PageKind, ds: &Dataset) -> Result<PathBuf> {
+pub fn save_dataset(kind: &PageKind, ds: &DataSet) -> Result<PathBuf> {
     let dir = store_dir();
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
@@ -68,7 +68,7 @@ fn page_filename(kind: &PageKind) -> &'static str {
 }
 
 #[derive(Clone, Debug)]
-pub struct Dataset {
+pub struct DataSet {
     pub headers: Option<Vec<String>>,
     pub rows: Vec<Vec<String>>,
 }

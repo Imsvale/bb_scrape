@@ -2,15 +2,9 @@
 use std::error::Error;
 
 use crate::{
-    config::options::{PageKind, ScrapeOptions, TeamSelector},
-    progress::Progress,
-    specs,
+    specs, teams, progress::Progress, store::{ self, DataSet },
+    config::options::{PageKind::*, ScrapeOptions, TeamSelector},
 };
-
-pub struct DataSet {
-    pub headers: Option<Vec<String>>,
-    pub rows: Vec<Vec<String>>,
-}
 
 /// Top-level: dispatch on page kind and collect data (no IO).
 pub fn run(
@@ -19,12 +13,12 @@ pub fn run(
 ) -> Result<DataSet, Box<dyn Error>> {
     match scrape.page {
         // PageKind::Teams         => collect_teams(),
-        PageKind::Teams         => collect_teams_with_progress(progress),
-        PageKind::Players       => collect_players(scrape, progress),
-        PageKind::SeasonStats   => todo!(),
-        PageKind::CareerStats   => todo!(),
-        PageKind::GameResults   => todo!(),
-        PageKind::Injuries      => todo!(),
+        Teams         => collect_teams_with_progress(progress),
+        Players       => collect_players(scrape, progress),
+        SeasonStats   => todo!(),
+        CareerStats   => todo!(),
+        GameResults   => todo!(),
+        Injuries      => todo!(),
     }
 }
 
