@@ -3,13 +3,32 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use crate::params::PLAYERS_SUBDIR;
+use crate::config::options::TeamSelector;
 use crate::{
+    config::{
+        options::{ AppOptions, ScrapeOptions, ExportOptions, ExportType, PageKind },
+        state::{ AppState },
+    },
     file,
-    params::{Params, PageKind, DEFAULT_OUT_DIR, DEFAULT_SINGLE_FILE},
     specs,
     store,
 };
+
+/// Top-level runner: dispatch on page kind and run.
+/// `progress` can be None (no UI updates) or Some(&mut impl Progress).
+pub fn run(
+    scrape: &ScrapeOptions,
+    export: &ExportOptions,
+    progress: Option<&mut dyn Progress>,
+) -> Result<RunSummary, Box<dyn Error>> {
+    match scrape.page {
+        PageKind::Players => get_players(scrape, export, progress),
+        // PageKind::SeasonStats => todo!(),
+        // PageKind::CareerStats => todo!(),
+        // PageKind::Season => todo!(),
+        // PageKind::Injuries => todo!(),
+    }
+}
 
 /// Optional progress sink for GUI/CLI.
 /// Implement this in the frontend (GUI: update labels/progress bar; CLI: print lines).
@@ -34,46 +53,32 @@ pub struct RunSummary {
     pub files_written: Vec<PathBuf>,
 }
 
-/// Top-level runner: dispatch on page kind and run.
-/// `progress` can be None (no UI updates) or Some(&mut impl Progress).
-pub fn run(
-    params: &Params,
-    progress: Option<&mut dyn Progress>,
-) -> Result<RunSummary, Box<dyn Error>> {
-    match params.page {
-        PageKind::Players => get_players(params, progress),
-        // PageKind::SeasonStats => todo!(),
-        // PageKind::CareerStats => todo!(),
-        // PageKind::Season => todo!(),
-        // PageKind::Injuries => todo!(),
+fn resolve_ids(sel: &TeamSelector) -> Vec<u32> {
+    match sel {
+        TeamSelector::All       => (0..32).collect(),
+        TeamSelector::One(id)   => vec![*id],
+        TeamSelector::Ids(v)    => v.clone(),
     }
 }
 
 // Collect players into memory according to selection/filter.
 // Does NOT write files. Honors include_headers/keep_hash; merges rows.
-pub fn collect_players(params: &Params) -> Result<DataSet, Box<dyn std::error::Error>> {
-    // Build ID list
-    let mut ids: Vec<u32> = if params.all {
-        // GUI: default “all teams selected”
-        // CLI: same if no one_team & no ids_filter
-        (0..32).collect()
-    } else {
-        vec![params.one_team.expect("one_team is required when not 'all'")]
-    };
-
-    if let Some(filter) = &params.ids_filter {
-        let mut f = filter.clone();
-        f.sort_unstable();
-        ids.retain(|id| f.binary_search(id).is_ok());
-    }
+pub fn collect_players(
+    scrape: &ScrapeOptions,
+    export: &ExportOptions,
+) -> Result<DataSet, Box<dyn std::error::Error>> {
+    let ids = resolve_ids(&scrape.teams);
 
     let mut merged_headers: Option<Vec<String>> = None;
     let mut rows: Vec<Vec<String>> = Vec::new();
 
-    for (i, id) in ids.iter().copied().enumerate() {
-        let bundle = specs::players::fetch_and_extract(id, params.keep_hash, params.include_headers)?;
-        // take headers only once (if requested and available)
-        if merged_headers.is_none() && params.include_headers {
+    for id in ids {
+        let bundle = specs::players::fetch_and_extract( // TODO: Investigate use of export options
+            id,
+            export.keep_hash,
+            export.include_headers,
+        )?;
+        if merged_headers.is_none() && export.include_headers {
             merged_headers = bundle.headers.clone();
         }
         rows.extend(bundle.rows);
@@ -84,25 +89,15 @@ pub fn collect_players(params: &Params) -> Result<DataSet, Box<dyn std::error::E
 
 /* ---------------- Players implementation ---------------- */
 fn get_players(
-    params: &Params,
+    scrape: &ScrapeOptions,
+    export: &ExportOptions,
     mut progress: Option<&mut dyn Progress>,
 ) -> Result<RunSummary, Box<dyn Error>> {
-    let mut ids: Vec<u32> = if params.all {
-        (0..32).collect()
-    } else {
-        vec![params.one_team.expect("one_team required when not --all")]
-    };
-
-    if let Some(filter) = &params.ids_filter {
-        // Intersect with filter. Filter is assumed sorted; if not, sort first.
-        let mut f = filter.clone();
-        f.sort_unstable();
-        ids.retain(|id| f.binary_search(id).is_ok());
-    }
+    let mut ids = resolve_ids(&scrape.teams);
 
     if ids.is_empty() {
         if let Some(p) = progress.as_deref_mut() {
-            p.log("No team IDs to process (after filtering).");
+            p.log("No team IDs to process.");
         }
         return Ok(RunSummary { files_written: Vec::new() });
     }
@@ -111,91 +106,85 @@ fn get_players(
         p.begin(ids.len());
     }
 
-    let mut written = Vec::with_capacity(ids.len());
+    match export.export_type {
+        ExportType::PerTeam => {
+            let outdir = export.out_path(); // directory
+            if !outdir.as_os_str().is_empty() {
+                std::fs::create_dir_all(&outdir)?;
+            }
 
-    let delim = params.format;
+            // Resolve duplicate stems like "Lions", "Lions-2", ...
 
-    if !params.single_file {
-        // ---------- PER-TEAM FILES ----------
-        // -o must be a directory (create if missing). If omitted → "./out"
-        let outdir = params
-            .out
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_OUT_DIR));
-        // only enforce dir semantics in per-team mode
-        let outdir = file::normalize_dir_path(outdir.to_string_lossy().as_ref())?;
-        file::ensure_directory(&outdir)?;
+            let mut seen: HashMap<String, usize> = HashMap::new();
+            let mut files = Vec::with_capacity(ids.len());
 
-        let mut seen: HashMap<String, usize> = HashMap::new();
-        let mut persisted_headers = false;
+            for id in ids.drain(..) {
+                let bundle = specs::players::fetch_and_extract(
+                    id,
+                    export.keep_hash,
+                    export.include_headers,
+                )?;
 
-        for id in ids {
-            let bundle = specs::players::fetch_and_extract(id, params.keep_hash, params.include_headers)?;
-            let stem = file::sanitize_team_filename(&bundle.team_name, id);
-            let path = file::resolve_team_filename(&outdir, &stem, &mut seen, delim);
+                // Prefer explicit team name from the bundle if available
+                let raw_stem = if !bundle.team_name.is_empty() {
+                    bundle.team_name.clone()
+                } else {
+                    format!("team_{id:02}")
+                };
 
-            if !persisted_headers {
+                let stem = file::sanitize_team_filename(&raw_stem, id);
+
+                let stem = {
+                    let c = seen.entry(stem).and_modify(|n| *n += 1).or_insert(0);
+                    if *c == 0 { seen.keys().last().unwrap().clone() }
+                    else { format!("{}--{}", seen.keys().last().unwrap(), *c + 1) }
+                };
+
+                let file_name = format!("{}.{}", stem, export.format.ext());
+                let path = outdir.join(file_name);
+
+                let txt = to_export_string(
+                    &bundle.headers,
+                    &bundle.rows,
+                    export.include_headers,
+                    export.keep_hash,
+                    export.delim(),
+                );
+                std::fs::write(&path, txt)?;
+
+                if let Some(p) = progress.as_deref_mut() {
+                    p.item_done(id, &path);
+                }
+                files.push(path);
+
                 if let Some(h) = &bundle.headers {
                     let _ = store::save_players_headers(h);
-                    persisted_headers = true;
                 }
             }
-
-            file::write_rows_start(&path, bundle.headers.as_deref(), delim)?;
-            file::append_rows(&path, &bundle.rows, delim)?;
-            if let Some(p) = progress.as_deref_mut() {
-                p.item_done(id, &path);
-            }
-            written.push(path);
+            Ok(RunSummary { files_written: files })
         }
-    } else {
-        // ---------- MERGED SINGLE FILE ----------
-        let out_hint = params.out
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_OUT_DIR).join(PLAYERS_SUBDIR).join(DEFAULT_SINGLE_FILE));
 
-        let resolved = if out_hint.is_dir() || crate::file::looks_like_dir_hint(&out_hint) {
-            file::ensure_directory(&out_hint)?;
-            out_hint.join(DEFAULT_SINGLE_FILE)
-        } else {
-            if let Some(parent) = out_hint.parent() {
+        ExportType::SingleFile => {
+            let path = export.out_path(); // full file path
+            if let Some(parent) = path.parent() {
                 if !parent.as_os_str().is_empty() {
-                    file::ensure_directory(parent)?;
+                    std::fs::create_dir_all(parent)?;
                 }
             }
-            out_hint
-        };
 
-        // We will write the header ONCE, from the first successful team bundle.
-        let mut wrote_header = false;
+            let ds = collect_players(scrape, export)?;
+            let txt = to_export_string(
+                &ds.headers,
+                &ds.rows,
+                export.include_headers,
+                export.keep_hash,
+                export.delim(),
+            );
 
-        for (i, id) in ids.iter().copied().enumerate() {
-            let bundle = specs::players::fetch_and_extract(id, params.keep_hash, params.include_headers)?;
-            if !wrote_header {
-                // use site headers if present and include_headers==true
-                file::write_rows_start(&resolved, bundle.headers.as_deref(), delim)?;
-                wrote_header = true;
-
-                if let Some(h) = &bundle.headers {
-                    let _ = store::save_players_headers(h);
-                }
-            } else {
-                // ensure file exists already (write_rows_start creates/truncates only once)
-                // then append rows for subsequent teams
-                // (no-op here; just fall through)
-            }
-            file::append_rows(&resolved, &bundle.rows, delim)?;
-
-            if let Some(p) = progress.as_deref_mut() {
-                p.item_done(id, &resolved);
-            }
-            if i == 0 {
-                written.push(resolved.clone());
-            }
+            std::fs::write(&path, txt)?;
+            Ok(RunSummary { files_written: vec![path] })
         }
     }
-
-    Ok(RunSummary { files_written: written })
 }
 
 /* ---------------- Team-list helper (GUI/CLI can call) ---------------- */

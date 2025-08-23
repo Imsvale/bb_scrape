@@ -4,7 +4,7 @@
 // HTTP/1.0 GET over TCP (std-only)
 
 use std::{io::{Read, Write}, net::TcpStream, time::Duration};
-use crate::params::{HOST, PREFIX};
+use crate::config::consts::{HOST, PREFIX};
 
 pub fn http_get(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut s = TcpStream::connect((HOST, 80))?;

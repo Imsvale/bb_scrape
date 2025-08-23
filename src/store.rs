@@ -1,13 +1,8 @@
 // src/store.rs
 use std::{fs, io, path::{PathBuf}, time::SystemTime, collections::HashMap};
-use crate::csv::{self, parse_rows, detect_headers, Delim};
-use crate::params::{DEFAULT_OUT_DIR, PLAYERS_SUBDIR, DEFAULT_SINGLE_FILE};
+use crate::csv::{self, parse_rows, detect_headers};
 
 pub struct Dataset { pub headers: Option<Vec<String>>, pub rows: Vec<Vec<String>> }
-
-fn headers_path() -> PathBuf {
-    PathBuf::from(DEFAULT_OUT_DIR).join(PLAYERS_SUBDIR).join("$headers")
-}
 
 pub fn save_players_headers(headers: &[String]) -> io::Result<()> {
     let p = headers_path();

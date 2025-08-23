@@ -1,9 +1,8 @@
 Usage:
-  bb-scrape --page players --all [-o <dir>] [--keephash] [--include-headers]
+  bb-scrape [-o <dir>] [--keephash] [--include-headers]
   bb-scrape --page players -t <id> [-o <path>] [--keephash] [--include-headers]
 
 Flags:
-  -a, --all               All teams (0..31)
   -t, --team <id>         Single team id
   -o, --out <path>        All: directory   Single: dir or filename
   -h, --help              This help

@@ -1,18 +1,10 @@
 // src/csv.rs
 use std::io::{self, Write};
 
-/// Output delimiter
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Delim {
-    Csv, // comma
-    Tsv, // tab
-}
-
 /* ---------------- Parsing ---------------- */
 
 /// Minimal CSV/TSV parser (quotes + CRLF tolerant). std-only.
-pub fn parse_rows(text: &str, delim: Delim) -> Vec<Vec<String>> {
-    let sep = match delim { Delim::Csv => ',', Delim::Tsv => '\t' };
+pub fn parse_rows(text: &str, sep: char) -> Vec<Vec<String>> {
     let mut rows = Vec::new();
     let mut field = s!();
     let mut row = Vec::new();
@@ -72,20 +64,16 @@ pub fn detect_headers(mut rows: Vec<Vec<String>>) -> (Option<Vec<String>>, Vec<V
 
 /* ---------------- Writing ---------------- */
 
-fn needs_quotes(field: &str, delim: Delim) -> bool {
-    match delim {
-        Delim::Csv => field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r'),
-        Delim::Tsv => field.contains('\t') || field.contains('"') || field.contains('\n') || field.contains('\r'),
-    }
+fn needs_quotes(field: &str, sep: char) -> bool {
+    field.contains(sep) || field.contains('"') || field.contains('\n') || field.contains('\r')
 }
 
 /// Write a single CSV/TSV row to any writer.
-pub fn write_row<W: Write>(mut w: W, row: &[String], delim: Delim) -> io::Result<()> {
-    let sep = match delim { Delim::Csv => ',', Delim::Tsv => '\t' };
+pub fn write_row<W: Write>(mut w: W, row: &[String], sep: char) -> io::Result<()> {
     let mut first = true;
     for cell in row {
         if !first { write!(w, "{}", sep)?; } else { first = false; }
-        if needs_quotes(cell, delim) {
+        if needs_quotes(cell, sep) {
             let escaped = cell.replace('"', "\"\"");
             write!(w, "\"{}\"", escaped)?;
         } else {
@@ -123,24 +111,24 @@ pub fn build_export_row(base_row: &[String], keep_hash: bool) -> Vec<String> {
 /// - `rows`: base rows (assumed to have '#' in Number column)
 /// - `include_headers`: whether to emit a header line
 /// - `keep_hash`: whether to keep '#' in Number column for export
-/// - `delim`: CSV or TSV
+/// - `sep`: character to be used as field/cell separator
 pub fn to_export_string(
     headers: &Option<Vec<String>>,
     rows: &[Vec<String>], // <-- Fix'd
     include_headers: bool,
     keep_hash: bool,
-    delim: Delim,
+    sep: char,
 ) -> String {
     let mut buf: Vec<u8> = Vec::new();
 
     if include_headers {
         if let Some(h) = headers {
-            let _ = write_row(&mut buf, h, delim);
+            let _ = write_row(&mut buf, h, sep);
         }
     }
     for r in rows {
         let mapped = build_export_row(r, keep_hash);
-        let _ = write_row(&mut buf, &mapped, delim);
+        let _ = write_row(&mut buf, &mapped, sep);
     }
 
     match String::from_utf8(buf) {
@@ -152,14 +140,14 @@ pub fn to_export_string(
 /* ---------------- Convenience: stringify rows as-is (no transforms) ---------------- */
 
 /// If you still need to stringify rows as-is for preview/debug.
-pub fn rows_to_string(rows: &[Vec<String>], headers: &Option<Vec<String>>, delim: Delim) -> String {
+pub fn rows_to_string(rows: &[Vec<String>], headers: &Option<Vec<String>>, sep: char) -> String {
     let mut buf: Vec<u8> = Vec::new();
 
     if let Some(h) = headers {
-        let _ = write_row(&mut buf, h, delim);
+        let _ = write_row(&mut buf, h, sep);
     }
     for r in rows {
-        let _ = write_row(&mut buf, r, delim);
+        let _ = write_row(&mut buf, r, sep);
     }
 
     match String::from_utf8(buf) {

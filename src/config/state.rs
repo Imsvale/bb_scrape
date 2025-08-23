@@ -1,5 +1,5 @@
 // src/config/app_state.rs
-use super::app_options::AppOptions;
+use super::options::AppOptions;
 
 #[derive(Clone, Debug)]
 pub struct GuiState {

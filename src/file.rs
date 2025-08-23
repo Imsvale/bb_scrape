@@ -7,13 +7,13 @@ use std::{
     collections::HashMap,
 };
 
-use crate::csv::{Delim, write_row};
+use crate::csv::write_row;
 
 /// Ensure parent dir exists; create/truncate file; optionally write header.
 pub fn write_rows_start(
     path: &Path,
     headers: Option<&[String]>,
-    delim: Delim,
+    sep: char,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -23,7 +23,7 @@ pub fn write_rows_start(
     let file = File::create(path)?; // truncate/overwrite
     let mut out = BufWriter::new(file);
     if let Some(h) = headers {
-        write_row(&mut out, h, delim)?;
+        write_row(&mut out, h, sep)?;
     }
     out.flush()?;
     Ok(())
@@ -33,12 +33,12 @@ pub fn write_rows_start(
 pub fn append_rows(
     path: &Path, 
     rows: &[Vec<String>],
-    delim: Delim,
+    sep: char,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = OpenOptions::new().append(true).open(path)?;
     let mut out = BufWriter::new(file);
     for row in rows {
-        write_row(&mut out, row, delim)?;
+        write_row(&mut out, row, sep)?;
     }
     out.flush()?;
     Ok(())
@@ -86,12 +86,8 @@ pub fn resolve_team_filename(
     dir: &Path,
     team_name: &str,
     seen_names: &mut HashMap<String, usize>,
-    delim: crate::csv::Delim,
+    sep: char,
 ) -> PathBuf {
-
-    let ext = match delim { 
-        Delim::Csv => "csv",
-        Delim::Tsv => "tsv"};
 
     let count = seen_names.entry(team_name.to_string()).or_insert(0);
     let filename = if *count == 0 {

@@ -1,3 +1,3 @@
-pub mod app_options;
-pub mod app_state;
+pub mod options;
+pub mod state;
 pub mod consts;

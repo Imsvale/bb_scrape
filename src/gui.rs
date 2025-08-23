@@ -1,50 +1,55 @@
 // src/gui.rs
 use std::{
     error::Error,
-    path::PathBuf, 
-    sync::{ Arc, Mutex }, 
+    path::{ Path, PathBuf },
+    sync::{ Arc, Mutex },
     thread,
 };
 
-use eframe::{egui};
-use egui::{RichText, Layout, Align, TextWrapMode, Direction};
-use egui_extras::{TableBuilder, Column};
+use eframe::egui;
+use egui::{ Align, Layout, RichText, TextWrapMode };
+use egui_extras::{ Column, TableBuilder };
 
 use crate::{
-    csv::{
-        rows_to_string, to_export_string, Delim },
-    params::{
-        PageKind, Params, DEFAULT_SINGLE_FILE, DEFAULT_OUT_DIR, PLAYERS_SUBDIR },
-    runner::{self, Progress},
+    config::{
+        options::{ AppOptions, ExportFormat, ExportType },
+        state::{ AppState, GuiState },
+    },
+    csv::{ rows_to_string, to_export_string },
+    runner::{ self, Progress },
     store,
     teams,
 };
 
-pub fn run(params: Params) -> Result<(), Box<dyn Error>> {
+pub fn run(app_state: AppState) -> Result<(), Box<dyn Error>> {
     let options = eframe::NativeOptions::default();
     eframe::run_native(
         "Brutalball Scraper",
         options,
-        Box::new(|_cc| Ok(Box::new(App::new(params)))),
+        Box::new(|_cc| Ok(Box::new(App::new(app_state)))),
     )?;
     Ok(())
 }
+
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum UiFormat { Csv, Tsv }
+enum UiFormat {
+    Csv,
+    Tsv,
+}
 
 pub struct App {
-    params: Params,
-    // teams & selection UI
+    // single source of truth
+    state: Arc<Mutex<AppState>>,
+
+    // teams & selection UI (selection lives inside state.gui)
     teams: Vec<(u32, String)>,
-    selected: Vec<u32>,
     last_clicked: Option<usize>,
 
-    // format & output path (GUI only)
-    fmt: UiFormat,
-    out_path: String,
+    // output text field UX (we map this <-> ExportOptions)
+    out_path_text: String,
     out_path_dirty: bool,
 
-    // in-memory data
+    // in-memory data preview
     headers: Option<Vec<String>>,
     rows: Vec<Vec<String>>,
 
@@ -54,7 +59,21 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(params: Params) -> Self {
+    pub fn new(app_state: AppState) -> Self {
+
+        // Teams list (fallback to 0..31 if file missing)
+        let teams = match teams::load() {
+            Ok(v) if !v.is_empty() => v,
+            _ => (0u32..32).map(|id| (id, format!("Team {}", id))).collect(),
+        };
+
+        // Default selection: all
+        app_state.gui = GuiState {
+            selected_team_ids: teams.iter().map(|(id, _)| *id).collect(),
+            ..GuiState::default()
+        };
+
+        // Local data cache
         let mut headers = None;
         let mut rows = Vec::new();
         let mut status = "Idle".to_string();
@@ -64,28 +83,21 @@ impl App {
             rows = ds.rows;
             status = "Loaded local data".to_string();
         }
-        // prune stray empty rows just in case
         rows.retain(|r| !r.is_empty() && !(r.len() == 1 && r[0].trim().is_empty()));
 
-        let teams = match teams::load() {
-            Ok(v) if !v.is_empty() => v,
-            _ => (0u32..32).map(|id| (id, format!("Team {}", id))).collect(),
-        };
-        let selected = teams.iter().map(|(id, _)| *id).collect();
-
-        let out_path = if params.single_file {
-            format!("{}/{}/{}", DEFAULT_OUT_DIR, PLAYERS_SUBDIR, DEFAULT_SINGLE_FILE)
-        } else {
-            format!("{}/{}/", DEFAULT_OUT_DIR, PLAYERS_SUBDIR)
-        };
+        // ExportOptions::out_path() -> PathBuf
+        let out_path_text = app_state
+            .options
+            .export
+            .out_path()
+            .to_string_lossy()
+            .into();
 
         Self {
-            params,
+            state: Arc::new(Mutex::new(app_state)),
             teams,
-            selected,
             last_clicked: None,
-            fmt: UiFormat::Csv,
-            out_path,
+            out_path_text,
             out_path_dirty: false,
             headers,
             rows,
@@ -94,59 +106,37 @@ impl App {
         }
     }
 
-    fn is_blank_row(r: &[String]) -> bool { r.iter().all(|s| s.trim().is_empty()) }
+    /* ---------- Output field <-> ExportOptions mapping ---------- */
 
-
-    fn apply_selection(&mut self) {
-        if self.selected.is_empty() {
-            self.params.all = true;
-            self.params.one_team = None;
-            self.params.ids_filter = None;
-        } else if self.selected.len() == 1 {
-            self.params.all = false;
-            self.params.one_team = Some(self.selected[0]);
-            self.params.ids_filter = None;
-        } else {
-            self.params.all = true; // still scrape all, but filter active
-            self.params.one_team = None;
-            let mut filt = self.selected.clone();
-            filt.sort_unstable();
-            filt.dedup();
-            self.params.ids_filter = Some(filt);
-        }
+    fn set_selection_message(&self) {
+        *self.status.lock().unwrap() = "Selection changed — not scraped yet.".to_string();
     }
 
+    /* ---------- Scrape/Export hooks ---------- */
+
     fn recollect(&mut self, ctx: &egui::Context) {
-        if self.running { return; }
+        if self.running {
+            return;
+        }
         self.running = true;
         *self.status.lock().unwrap() = "Refreshing…".to_string();
 
-        // Update params in place
-        if self.selected.is_empty() {
-            self.params.all = true;
-            self.params.one_team = None;
-            self.params.ids_filter = None;
-        } else if self.selected.len() == 1 {
-            self.params.all = false;
-            self.params.one_team = Some(self.selected[0]);
-            self.params.ids_filter = None;
-        } else {
-            self.params.all = true;
-            self.params.one_team = None;
-            let mut filt = self.selected.clone();
-            filt.sort_unstable();
-            filt.dedup();
-            self.params.ids_filter = Some(filt);
-        }
-
-        let params_clone = self.params.clone();
+        let snapshot = self.state.lock().unwrap().clone();
+        let scrape = snapshot.options.scrape;
+        let export = snapshot.options.export;
         let status_arc = self.status.clone();
         let ctx2 = ctx.clone();
 
         thread::spawn(move || {
-            let ds = runner::collect_players(&params_clone);
+            // New-world call: runner takes ScrapeOptions directly.
+            // Adjust as needed when runner’s exact signature lands.
+            let ds = runner::collect_players(&scrape, &export);
             let msg = match ds {
-                Ok(ds) => format!("Ready: {} rows{}", ds.rows.len(), if ds.headers.is_some() { " + headers" } else { "" }),
+                Ok(ds) => format!(
+                    "Ready: {} rows{}",
+                    ds.rows.len(),
+                    if ds.headers.is_some() { " + headers" } else { "" }
+                ),
                 Err(e) => format!("Error: {}", e),
             };
             *status_arc.lock().unwrap() = msg;
@@ -154,27 +144,12 @@ impl App {
         });
     }
 
-
     fn sync_collect(&mut self) {
-        // Adjust params based on current UI selections
-        if self.selected.is_empty() {
-            self.params.all = true;
-            self.params.one_team = None;
-            self.params.ids_filter = None;
-        } else if self.selected.len() == 1 {
-            self.params.all = false;
-            self.params.one_team = Some(self.selected[0]);
-            self.params.ids_filter = None;
-        } else {
-            self.params.all = true;
-            self.params.one_team = None;
-            let mut filt = self.selected.clone();
-            filt.sort_unstable();
-            filt.dedup();
-            self.params.ids_filter = Some(filt);
-        }
+        let snapshot = self.state.lock().unwrap().clone();
+        let scrape = snapshot.options.scrape;
+        let export = snapshot.options.export;
 
-        match runner::collect_players(&self.params) {
+        match runner::collect_players(&scrape, &export) {
             Ok(ds) => {
                 self.headers = ds.headers;
                 self.rows = ds.rows;
@@ -183,7 +158,7 @@ impl App {
                     let _ = store::save_players_headers(h);
                 }
 
-                *self.status.lock().unwrap() = "Ready".into();
+                *self.status.lock().unwrap() = "Ready".to_string();
             }
             Err(e) => {
                 *self.status.lock().unwrap() = format!("Error: {}", e);
@@ -195,175 +170,246 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Tabs (future expansion)
+        /* ---------------- Tabs (stub) ---------------- */
         egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.params.page, PageKind::Players, "Players");
+                ui.selectable_label(true, "Players"); // single page for now
             });
         });
 
-        // Left: team multiselect with All/None
+        /* -------------- Left: team multi-select -------------- */
         egui::SidePanel::left("teams").resizable(false).show(ctx, |ui| {
             ui.heading("Teams");
             ui.horizontal(|ui| {
                 if ui.button("All").clicked() {
-                    self.selected = self.teams.iter().map(|(id, _)| *id).collect();
+                    let mut st = self.state.lock().unwrap();
+                    st.gui.selected_team_ids = self.teams.iter().map(|(id, _)| *id).collect();
+                    drop(st);
+                    self.set_selection_message();
                 }
                 if ui.button("None").clicked() {
-                    self.selected.clear();
+                    self.state.lock().unwrap().gui.selected_team_ids.clear();
+                    self.set_selection_message();
                 }
             });
             ui.separator();
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-
-                let mut needs_status = false;
+                let mut changed = false;
 
                 for (idx, (id, name)) in self.teams.iter().enumerate() {
-                    let is_selected = self.selected.contains(id);
+                    let is_selected = {
+                        let st = self.state.lock().unwrap();
+                        st.gui.selected_team_ids.contains(id)
+                    };
+
                     let resp = ui.selectable_label(is_selected, name);
+
                     if resp.clicked() && !self.running {
                         let input = ui.input(|i| i.clone());
+                        let mut st = self.state.lock().unwrap();
+                        let sel = &mut st.gui.selected_team_ids;
+
                         if input.modifiers.ctrl {
-                            if is_selected { self.selected.retain(|x| x != id); }
-                            else { self.selected.push(*id); }
+                            if is_selected {
+                                sel.retain(|x| x != id);
+                            } else {
+                                sel.push(*id);
+                            }
                             self.last_clicked = Some(idx);
                         } else if input.modifiers.shift {
                             if let Some(last) = self.last_clicked {
-                                let (lo, hi) = if last <= idx {(last, idx)} else {(idx, last)};
-                                self.selected.clear();
-                                for j in lo..=hi { self.selected.push(self.teams[j].0); }
+                                let (lo, hi) = if last <= idx { (last, idx) } else { (idx, last) };
+                                sel.clear();
+                                for j in lo..=hi {
+                                    sel.push(self.teams[j].0);
+                                }
                             }
                         } else {
-                            self.selected.clear();
-                            self.selected.push(*id);
+                            sel.clear();
+                            sel.push(*id);
                             self.last_clicked = Some(idx);
                         }
-                        
-                        needs_status = true;
+                        changed = true;
                     }
                 }
-                if needs_status {
-                    *self.status.lock().unwrap() = "Selection changed — not scraped yet.".into();
+
+                if changed {
+                    self.set_selection_message();
                 }
             });
         });
 
-        // Center: options + display + copy/export
+        /* -------------- Center: options + preview + actions -------------- */
         egui::CentralPanel::default().show(ctx, |ui| {
-
             ui.heading("Players");
-
             ui.separator();
 
-            // Format selector (CSV/TSV) — affects Copy/Export only
-            let prev_fmt = self.fmt;
+            // Format selector (binds to ExportOptions)
+            // TODO: Transition to new config
+            let prev_fmt = {
+                let st = self.state.lock().unwrap();
+                match st.options.export.format {
+                    ExportFormat::Csv => UiFormat::Csv,
+                    ExportFormat::Tsv => UiFormat::Tsv,
+                }
+            };
+
+            let mut fmt = prev_fmt;
             ui.horizontal(|ui| {
                 ui.label("Format:");
-                ui.selectable_value(&mut self.fmt, UiFormat::Csv, "CSV");
-                ui.selectable_value(&mut self.fmt, UiFormat::Tsv, "TSV");
+                ui.selectable_value(&mut fmt, UiFormat::Csv, "CSV");
+                ui.selectable_value(&mut fmt, UiFormat::Tsv, "TSV");
             });
 
-            if self.fmt != prev_fmt {
-                // push into params so runner/export uses it everywhere
-                self.params.format = match self.fmt {
-                    UiFormat::Csv => Delim::Csv,
-                    UiFormat::Tsv => Delim::Tsv,
-               };
+            if fmt != prev_fmt {
+                let mut st = self.state.lock().unwrap();
+                st.options.export.format = match fmt {
+                    UiFormat::Csv => ExportFormat::Csv,
+                    UiFormat::Tsv => ExportFormat::Tsv,
+                };
 
-                // If the output path wasn't manually edited and we're in single-file mode,
-                // flip the filename extension .csv <-> .tsv to match the new format.
-                if !self.out_path_dirty && self.params.single_file {
-                    if let Some(dot) = self.out_path.rfind('.') {
-                        let (stem, ext) = self.out_path.split_at(dot);
-                        match self.params.format {
-                            Delim::Csv if ext.eq_ignore_ascii_case(".tsv") => {
-                                self.out_path = format!("{stem}.csv");
-                            }
-                            Delim::Tsv if ext.eq_ignore_ascii_case(".csv") => {
-                                self.out_path = format!("{stem}.tsv");
-                            }
-                            _ => {}
-                        }
-                    }
+                if !self.out_path_dirty {
+                    self.out_path_text = st
+                        .options
+                        .export
+                        .out_path()
+                        .to_string_lossy()
+                        .into_owned();
                 }
             }
 
-            ui.checkbox(&mut self.params.include_headers, "Include headers");
-            ui.checkbox(&mut self.params.keep_hash, "Keep hash in player numbers");
+            // Export-affecting toggles
+            {
+                let mut st = self.state.lock().unwrap();
+                ui.checkbox(&mut st.options.export.include_headers, "Include headers");
+                ui.checkbox(&mut st.options.export.keep_hash, "Keep hash in player numbers");
+            }
 
-            // Export options
+            // Export options (Single vs Per-team + Output field)
             ui.horizontal(|ui| {
-                let single_file_checkbox = ui.checkbox(&mut self.params.single_file, "Single file");
+                let mut app_state = self.state.lock().unwrap();
+                let mut export = app_state.options.export;
+
+                let before = export.export_type;
+                let mut single = matches!(before, ExportType::SingleFile);
+                let single_resp = ui.checkbox(&mut single, "Single file");
+
                 ui.label("Output:");
-                let resp = ui.text_edit_singleline(&mut self.out_path);
+                let resp = ui.text_edit_singleline(&mut self.out_path_text);
                 if resp.changed() {
                     self.out_path_dirty = true;
                 }
 
-                let ext = match self.fmt {
-                    UiFormat::Csv => "csv",
-                    UiFormat::Tsv => "tsv"
-                };
-
-                let single_file_before = self.params.single_file;
-                if single_file_checkbox.changed() {
+                if single_resp.changed() {
+                    export.export_type = if single { 
+                        ExportType::SingleFile 
+                    } else { 
+                        ExportType::PerTeam 
+                    };
+                    
                     if !self.out_path_dirty {
-                        if self.params.single_file {
-                            // switched to merged: use single file
-                            self.out_path = format!("{DEFAULT_OUT_DIR}/{PLAYERS_SUBDIR}/{DEFAULT_SINGLE_FILE}.{ext}");
-                        } else {
-                            // switched to per-team: use directory
-                            self.out_path = format!("{DEFAULT_OUT_DIR}/{PLAYERS_SUBDIR}/");
-                        }
+                        // Repaint the field from the model's resolved path/dir
+                        self.out_path_text = export
+                            .out_path()
+                            .to_string_lossy()
+                            .into_owned();
                     }
                 }
             });
 
+            // #######################
+            // COPY & EXPORT BUTTONS #
+            // #######################
             ui.horizontal(|ui| {
+
+                // Copy
                 if ui.button("Copy").clicked() {
+                    let st = self.state.lock().unwrap().clone();
                     let txt = to_export_string(
                         &self.headers,
                         &self.rows,
-                        self.params.include_headers,
-                        self.params.keep_hash,
-                        self.params.format, // CSV / TSV
+                        st.options.export.include_headers,
+                        st.options.export.keep_hash,
+                        st.options.export.delim(), // char from ExportOptions
                     );
                     ctx.copy_text(txt);
-                    *self.status.lock().unwrap() = "Copied to clipboard".into();
+                    *self.status.lock().unwrap() = "Copied to clipboard".to_string();
                 }
 
+                // Export
                 if ui.button("Export").clicked() {
-                    let res = if self.params.single_file {
-                        // SINGLE-FILE EXPORT: File name as given, or default
-                        let path = PathBuf::from(&self.out_path);
-                        if let Some(parent) = path.parent() {
-                            if !parent.as_os_str().is_empty() { let _ = std::fs::create_dir_all(parent); }
+                    // Push Output text → ExportOptions if dirty
+                    {
+                        let mut st = self.state.lock().unwrap();
+                        if self.out_path_dirty {
+                            st.options.export.set_path(&self.out_path_text); // <- use model API
+                            self.out_path_dirty = false;
                         }
-                        let txt = rows_to_string(&self.rows, &self.headers, self.params.format);
-                        std::fs::write(&path, txt)
-                            .map(|_| runner::RunSummary { files_written: vec![path] })
-                            .map_err(|e| e.into())
-                    } else {
-                        // MULTI-FILE EXPORT: File names from team names
-                        self.params.out = Some(PathBuf::from(&self.out_path));
-                        self.params.format = match self.fmt { UiFormat::Csv => Delim::Csv, UiFormat::Tsv => Delim::Tsv };
-                        runner::run(&self.params, None)
-                    };
+                    }
+
+                    // Snapshot for IO
+                    let st = self.state.lock().unwrap().clone();
+
+                    let res: Result<runner::RunSummary, Box<dyn Error>> =
+                        if matches!(st.options.export.export_type, ExportType::SingleFile) {
+                            // Single-file: write directly here
+                            let path = st.options.export.out_path(); // PathBuf directly
+
+                            if let Some(parent) = path.parent() {
+                                if !parent.as_os_str().is_empty() {
+                                    let _ = std::fs::create_dir_all(parent);
+                                }
+                            }
+
+                            let txt = to_export_string(
+                                &self.headers,
+                                &self.rows,
+                                st.options.export.include_headers,
+                                st.options.export.keep_hash,
+                                st.options.export.delim(), // stay consistent with Copy
+                            );
+
+                            std::fs::write(&path, txt)
+                                .map(|_| runner::RunSummary { files_written: vec![path] })
+                                .map_err(|e| e.into())
+                        } else {
+                            // Per-team: delegate to runner with ExportOptions directly
+                            runner::export_per_team(
+                                &st.options.export,
+                                &self.headers,
+                                &self.rows,
+                                &self.teams,
+                            )
+                        };
 
                     match res {
-                        Ok(sum) => { /* same status reporting as before */ }
-                        Err(e) => *self.status.lock().unwrap() = format!("Export error: {}", e),
+                        Ok(sum) => {
+                            if let Some(last) = sum.files_written.last() {
+                                *self.status.lock().unwrap() =
+                                    format!("Exported {} file(s), e.g. {}", sum.files_written.len(), last.display());
+                            } else {
+                                *self.status.lock().unwrap() = "Export done".to_string();
+                            }
+                        }
+                        Err(e) => {
+                            *self.status.lock().unwrap() = format!("Export error: {}", e);
+                        }
                     }
                 }
 
+                // SCRAPE (sync for now)
                 let red = egui::Color32::from_rgb(220, 30, 30);
                 let black = egui::Color32::BLACK;
-
-                if ui.add(
-                    egui::Button::new(egui::RichText::new("SCRAPE").color(black).strong())
-                        .fill(red)
-                ).clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("SCRAPE").color(black).strong(),
+                        )
+                        .fill(red),
+                    )
+                    .clicked()
+                {
                     self.sync_collect();
                 }
 
@@ -372,24 +418,25 @@ impl eframe::App for App {
                 ui.label(format!("Status: {}", status));
             });
 
+
             ui.separator();
 
-            // Live table preview (egui_extras 0.32 API)
-            let cols = self.headers.as_ref().map(|h| h.len())
+            // Live table preview
+            let cols = self
+                .headers
+                .as_ref()
+                .map(|h| h.len())
                 .or_else(|| self.rows.get(0).map(|r| r.len()))
                 .unwrap_or(0);
 
-            // Canonical columns (Name, Number, Race, Team) get wider baselines.
-            // Numeric columns get compact baseline and are resizable by the user.
             let mut table = TableBuilder::new(ui)
                 .striped(true)
                 .min_scrolled_height(0.0)
                 .column(Column::auto().resizable(true).at_least(180.0)) // Name
-                .column(Column::auto().resizable(true).at_least(30.0))  // Number
+                .column(Column::auto().resizable(true).at_least(30.0)) // Number
                 .column(Column::auto().resizable(true).at_least(120.0)) // Race
-                .column(Column::auto().resizable(true).at_least(140.0));// Team
+                .column(Column::auto().resizable(true).at_least(140.0)); // Team
 
-            // Remaining columns (usually numeric): narrower
             for _ in 4..cols {
                 table = table.column(Column::auto().resizable(true).at_least(30.0));
             }
@@ -398,28 +445,23 @@ impl eframe::App for App {
                 .header(24.0, |mut header| {
                     if let Some(hs) = &self.headers {
                         for h in hs {
-                            header.col(|ui| {
-                                ui.scope(|ui| {
-                                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend); // no wrap
-                                    ui.with_layout(
-                                        Layout::left_to_right(Align::Center),
-                                        // Bold header; let theme decide color for now
-                                        |ui| {ui.label(RichText::new(h).strong()); }
-                                    );
-                                });
-                            });
+                            header.col(|ui| { ui.scope(|ui| { 
+                                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                                ui.with_layout(
+                                    Layout::left_to_right(Align::Center),
+                                    |ui| { ui.label(RichText::new(h).strong()); }
+                                );
+                            }); });
                         }
                     } else {
-                        for i in 0..cols {
-                            header.col(|ui| {
-                                ui.scope(|ui| {
-                                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                                    ui.with_layout(
-                                        Layout::left_to_right(Align::Center),
-                                        |ui| { ui.label(RichText::new(format!("Col {}", i + 1)).strong()); }
-                                    );
-                                });
-                            });
+                        for i in 0..cols { 
+                            header.col(|ui| { ui.scope(|ui| { 
+                                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                                ui.with_layout(
+                                    Layout::left_to_right(Align::Center),
+                                    |ui| { ui.label(RichText::new(format!("Col {}", i + 1)).strong()); }
+                                );
+                            }); });
                         }
                     }
                 })
@@ -430,17 +472,17 @@ impl eframe::App for App {
                             for (ci, cell) in data.iter().enumerate() {
                                 row.col(|ui| {
                                     ui.scope(|ui| {
-                                        ui.style_mut().wrap_mode = Some(TextWrapMode::Extend); // no wrap
+                                        ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
 
                                         let rt = RichText::new(cell);
                                         if ci == 0 {
-                                            // Name: left align
                                             ui.label(rt);
                                         } else {
-                                            // Others: center horizontally
                                             ui.with_layout(
                                                 Layout::left_to_right(Align::Center),
-                                                |ui| { ui.label(rt); }
+                                                |ui| {
+                                                    ui.label(rt);
+                                                },
                                             );
                                         }
                                     });
@@ -449,39 +491,31 @@ impl eframe::App for App {
                         }
                     });
                 });
-        
-        }); // End egui::CentralPanel::default().show
+        });
     }
 }
 
-fn apply_keep_hash(rows: &[Vec<String>], keep_hash: bool) -> Vec<Vec<String>> {
-    // Copy-on-transform; we only touch column 1 if present.
-    let mut out = Vec::with_capacity(rows.len());
-    for r in rows {
-        if r.len() > 1 {
-            let mut nr = r.clone();
-            if keep_hash {
-                if !nr[1].starts_with('#') && !nr[1].is_empty() {
-                    nr[1] = format!("#{}", nr[1]);
-                }
-            } else {
-                nr[1] = nr[1].trim_start_matches('#').to_string();
-            }
-            out.push(nr);
-        } else {
-            out.push(r.clone());
-        }
-    }
-    out
+/* ---------------- helpers ---------------- */
+
+fn trim_trailing_sep(s: &str) -> &str {
+    s.trim_end_matches(['/', '\\'])
 }
 
-/* ---------- Progress adapter ---------- */
-struct GuiProgress { status: Arc<Mutex<String>> }
+/* ---------- Progress adapter (kept; runner can accept it or ignore) ---------- */
+struct GuiProgress {
+    status: Arc<Mutex<String>>,
+}
 impl runner::Progress for GuiProgress {
-    fn begin(&mut self, total: usize) { *self.status.lock().unwrap() = format!("Starting… {} team(s)", total); }
-    fn log(&mut self, msg: &str) { *self.status.lock().unwrap() = msg.to_string(); }
+    fn begin(&mut self, total: usize) {
+        *self.status.lock().unwrap() = format!("Starting… {} team(s)", total);
+    }
+    fn log(&mut self, msg: &str) {
+        *self.status.lock().unwrap() = msg.to_string();
+    }
     fn item_done(&mut self, team_id: u32, path: &std::path::Path) {
         *self.status.lock().unwrap() = format!("Done team {} → {}", team_id, path.display());
     }
-    fn update_status(&mut self, msg: &str) { *self.status.lock().unwrap() = msg.to_string(); }
+    fn update_status(&mut self, msg: &str) {
+        *self.status.lock().unwrap() = msg.to_string();
+    }
 }
