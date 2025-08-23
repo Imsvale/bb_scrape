@@ -290,7 +290,7 @@ impl eframe::App for App {
                 let export = &mut st.options.export;
 
                 ui.checkbox(&mut export.include_headers, "Include headers");
-                ui.checkbox(&mut export.keep_hash, "Keep hash in player numbers");
+                ui.checkbox(&mut export.keep_hash, "Keep # in player number");
             }
 
             // Export options (Single vs Per-team + Output field)
@@ -300,7 +300,7 @@ impl eframe::App for App {
 
                 let before = &export.export_type;
                 let mut single = matches!(before, ExportType::SingleFile);
-                let single_resp = ui.checkbox(&mut single, "Single file");
+                let single_resp = ui.checkbox(&mut single, "All teams in one file");
 
                 ui.label("Output:");
                 let resp = ui.text_edit_singleline(&mut self.out_path_text);
