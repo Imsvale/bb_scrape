@@ -246,10 +246,12 @@ impl eframe::App for App {
             ui.separator();
 
             // Format selector (binds to ExportOptions)
-            // TODO: Transition to new config
             let prev_fmt = {
+
                 let st = self.state.lock().unwrap();
-                match st.options.export.format {
+                let export = &st.options.export;
+
+                match export.format {
                     ExportFormat::Csv => UiFormat::Csv,
                     ExportFormat::Tsv => UiFormat::Tsv,
                 }
@@ -263,8 +265,11 @@ impl eframe::App for App {
             });
 
             if fmt != prev_fmt {
+
                 let mut st = self.state.lock().unwrap();
-                st.options.export.format = match fmt {
+                let export = &mut st.options.export;
+                
+                export.format = match fmt {
                     UiFormat::Csv => ExportFormat::Csv,
                     UiFormat::Tsv => ExportFormat::Tsv,
                 };
@@ -282,8 +287,10 @@ impl eframe::App for App {
             // Export-affecting toggles
             {
                 let mut st = self.state.lock().unwrap();
-                ui.checkbox(&mut st.options.export.include_headers, "Include headers");
-                ui.checkbox(&mut st.options.export.keep_hash, "Keep hash in player numbers");
+                let export = &mut st.options.export;
+
+                ui.checkbox(&mut export.include_headers, "Include headers");
+                ui.checkbox(&mut export.keep_hash, "Keep hash in player numbers");
             }
 
             // Export options (Single vs Per-team + Output field)
@@ -327,13 +334,16 @@ impl eframe::App for App {
                 // # Button: Copy #
                 // ################
                 if ui.button("Copy").clicked() {
+
                     let st = self.state.lock().unwrap().clone();
+                    let export = &st.options.export;
+
                     let txt = to_export_string(
                         &self.headers,
                         &self.rows,
-                        st.options.export.include_headers,
-                        st.options.export.keep_hash,
-                        st.options.export.delim(), // char from ExportOptions
+                        export.include_headers,
+                        export.keep_hash,
+                        export.delimiter().unwrap(), // Option(char) from ExportOptions
                     );
                     ctx.copy_text(txt);
                     *self.status.lock().unwrap() = "Copied to clipboard".to_string();
@@ -345,8 +355,10 @@ impl eframe::App for App {
                     // Push Output text → ExportOptions if dirty
                     {
                         let mut st = self.state.lock().unwrap();
+                        let export = &mut st.options.export;
+
                         if self.out_path_dirty {
-                            st.options.export.set_path(&self.out_path_text);
+                            export.set_path(&self.out_path_text);
                             self.out_path_dirty = false;
                         }
                     }
