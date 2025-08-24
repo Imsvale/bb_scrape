@@ -12,10 +12,14 @@ use egui_extras::{ Column, TableBuilder };
 
 use crate::{
     config::{
-        options::{ ExportFormat, 
-            ExportType::{ SingleFile, PerTeam }, 
-            PageKind },
         state::{ AppState, GuiState },
+        options::{ 
+            ExportFormat, 
+            ExportType::{ SingleFile, PerTeam }, 
+            PageKind,
+            TeamSelector,
+        },
+        
     },
     file,
     scrape,
@@ -119,6 +123,9 @@ impl App {
         self.running = true;
         *self.status.lock().unwrap() = "Refreshing…".to_string();
 
+        // Push GUI selection into scrape options
+        self.sync_gui_selection_into_scrape();
+
         let snapshot = self.state.lock().unwrap().clone();
         let scrape = snapshot.options.scrape;
         let status_arc = self.status.clone();
@@ -142,6 +149,10 @@ impl App {
 
     fn sync_collect(&mut self) {
         let mut prog = GuiProgress::new(self.status.clone());
+
+        // Push GUI selection into scrape options
+        self.sync_gui_selection_into_scrape();
+
         let snapshot = self.state.lock().unwrap().clone();
         let scrape = snapshot.options.scrape;
 
@@ -162,6 +173,28 @@ impl App {
             }
         }
         self.running = false;
+    }
+
+    /// Mirror the GUI's selected_team_ids into options.scrape.teams.
+    fn sync_gui_selection_into_scrape(&mut self) {
+        let teams_total = self.teams.len();
+
+        let mut st = self.state.lock().unwrap();
+        let sel = &st.gui.selected_team_ids;
+
+        st.options.scrape.teams = if sel.is_empty() {
+            // Nothing selected -> empty Ids list (scrape nothing)
+            TeamSelector::Ids(Vec::new())
+        } else if sel.len() == teams_total {
+            TeamSelector::All
+        } else if sel.len() == 1 {
+            TeamSelector::One(sel[0])
+        } else {
+            let mut v = sel.clone();
+            v.sort_unstable();
+            v.dedup();
+            TeamSelector::Ids(v)
+        };
     }
 }
 
