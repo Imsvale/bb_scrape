@@ -1,65 +1,123 @@
-# README.md
+# Brutalball Scraper
 
-## Brutalball Scraper
+A fast site scraper for Brutalball.
 
-A super-lightweight scraper that pulls player data from the Dozerverse/Brutalball website and writes it to a file in CSV format.
-
-By default it grabs players from all teams and outputs to `players.csv`. Just run it and wait a few seconds.
-
-To grab players only from a specific team, use the ID from the URL along with the `-t` flag documented below.
-
-* E.g. `team.php?i=20` → ID is `20` which is Failurewood Hills.
+![Graphical interface](assets/screenshot_small.png)
 
 ---
 
-## Usage (CLI)
+## Download & Run
 
-```
-Usage: [ -t <id> ] [-o <output.csv>]
+* **Windows:** run `bb_scrape.exe` for the GUI.
+  Command-line users run `cli.exe`.
+* **Linux/macOS (from source):**
+  * Install Rust, then:
+  * Build GUI: `cargo build --release`
+  * Build CLI: `cargo build --release --bin cli --features=cli` (required)
 
-Options:
-  -t, --team <id>       Scrape a single team by ID
-  -o, --out <file>      Output CSV path (default: players.csv)
-  -h, --help            Show this help
-```
+### Quick start (Windows)
 
-### Examples
+1. **Download** `bb_scrape.exe`.
+1. **Move** it to a suitable folder.
+1. **Run** `bb_scrape.exe`.
+1. Click **SCRAPE**.
+1. `Copy` to clipboard.
+1. `Export` to file → `out/players/all.csv`.
+
+Tip: The left panel lets you pick which teams to scrape.
+
+---
+
+### Features
+
+* **Player data:** `Name, #00, Race, Team, TV, OVR, ..., Dur, Sal`
+* **Formats:** 
+  * Comma-separated values `(CSV)`
+  * Tab-separated values `(TSV)`
+* **Toggle headers**
+* **Toggle player number `#` sign**
+* **Copy to clipboard**
+* **Export to file**
+  * Single file (all players)
+  * Per team
+* **Select** which teams to scrape.
+  * `All` / `None`
+  * `Ctrl + click`: Select individual teams
+  * `Shift + click`: Select range of teams
+  * `Ctrl + Shift + click`: Select multiple ranges
+* **Scrape** to update on demand.
+* **Data cached locally**
+
+---
+
+### Defaults
+
+* **Export directory:**
+  * `out/players`
+* **Format:** `CSV`
+* **Export file (single):** `all.csv`
+* **Export files (multi):** `<Team_Name>.csv`
+* **Local cache:** `.store`
+
+---
+
+### Command line usage
+
+Run:
 
 ```bash
-# All teams to default file (players.csv)
-./bb-scrape
-
-# All teams to custom file
-./bb-scrape -o league.csv
-
-# Single team (ID 20: Failurewood Hills)
-./bb-scrape -t 20
-
-# Single team to custom file
-./bb-scrape -t 20 -o failurewood.csv
+./cli
 ```
 
----
+Scrapes all teams and outputs all players to default directory and file: `out/players/all.csv`.
 
-## Output format
-
-* **No header row** (intended for easy paste into spreadsheets).
-* Each row is **CSV**.
-
-**Columns (in order):**
-
-1. `Name` — player name
-2. `Number` — player number, e.g. `#27` (the hash is **kept**)
-3. `Race` — e.g. `Common Orc`
-4. `Team` — team name
-5. Remaining numeric attributes as shown on the site, left-to-right
-
----
-
-## Build
+Print help:
 
 ```bash
-# Release build (recommended)
-cargo build --release
-# Binary at: target/release/bb_scrape
+./cli -h
 ```
+
+Common flags:
+
+```
+-p, --page players|teams    Which page to scrape (default: players)
+-f, --format csv|tsv        Output format (default: csv)
+-m, --multi, --per-team     Per-team files
+-t, --team <id>             One team by id (0–31)
+-o, --out <path>            Output file path (single) or directory (per-team)
+-i, --ids <list>            Subset of ids, e.g. 0,2,5-7
+-x, --drop-headers          Do not write the header row
+-#, --nohash                Strip '#' from player numbers (Players page only)
+-l, --list-teams            Print "id,team" for all teams and exit
+```
+
+Examples:
+
+```bash
+# All teams → single CSV (default path: out/players/all.csv)
+cli
+
+# One team (id 0) → TSV with headers
+cli --team 0 --format tsv -o out/vuvu.tsv
+
+# A subset of teams → per-team CSVs in a folder
+cli --ids 0,2,5-7 -o out/players
+
+# Teams list only
+cli --page teams -o out/teams.csv
+```
+
+---
+
+### Caching & Refresh
+
+* The app stores raw datasets under `.store/`.
+* On startup, it loads the cache if present.
+* Team names can be force-refreshed by clicking Refresh.
+* Team names are refreshed with a **SCRAPE**.
+
+---
+
+### License
+
+MIT. Use at your own risk.
