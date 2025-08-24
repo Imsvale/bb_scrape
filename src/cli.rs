@@ -90,6 +90,7 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
                 let v = args.next().ok_or("Missing value for --page")?;
                 scrape.page = match v.to_ascii_lowercase().as_str() {
                     "players" => PageKind::Players,
+                    "teams"   => PageKind::Teams,
                     other => return Err(format!("Unknown page: {}", other).into()),
                 };
             }
