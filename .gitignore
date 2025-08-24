@@ -1,6 +1,18 @@
-.store
-/assets
-/out
-/target
+# Rust
+/target/
+/Cargo.lock
+
+# VSCode / IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App artifacts
+/out/
+/.store/
+gfx/
 *.exe
 *.zip
