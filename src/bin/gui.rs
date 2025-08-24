@@ -7,7 +7,7 @@ use eframe::egui::{ IconData, ViewportBuilder };
 fn app_icon() -> IconData {
     let rgba = image::load_from_memory(include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/assets/icon.png"
+        "/assets/brutalball.png"
     )))
     .unwrap()
     .to_rgba8();

@@ -79,18 +79,18 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
                 std::process::exit(0);
             }
 
-            "--list-teams" => {
+            "-l" | "--list-teams" => {
                 for (id, name) in crate::scrape::list_teams() {
                     println!("{:2}  {}", id, name);
                 }
                 std::process::exit(0);
             }
 
-            "--page" => {
+            "-p" | "--page" => {
                 let v = args.next().ok_or("Missing value for --page")?;
                 scrape.page = match v.to_ascii_lowercase().as_str() {
                     "players" => PageKind::Players,
-                    other => return Err(format!("Unknown page: {} (more pages to be implemented!)", other).into()),
+                    other => return Err(format!("Unknown page: {}", other).into()),
                 };
             }
 
@@ -105,7 +105,7 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
                 };
             }
 
-            "--ids" => {
+            "-i" | "--ids" => {
                 let v = args.next().ok_or("Missing value for --ids")?;
                 let list = parse_ids_list(&v)?;
                 scrape.teams = TeamSelector::Ids(list);
@@ -116,20 +116,20 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
                 export.set_path(&path);
             }
 
-            "--format" => {
+            "-f" | "--format" => {
                 let v = args.next().ok_or("Missing value for --format")?;
                 export.format = match v.to_ascii_lowercase().as_str() {
                     "csv" => ExportFormat::Csv,
                     "tsv" => ExportFormat::Tsv,
+                    // "json" => ExportFormat::Json,
+                    // "toml" => ExportFormat::Toml,
                     other => return Err(format!("Unknown format: {}", other).into()),
                 };
             }
 
-            "--nohash" => { export.keep_hash = false; }
-            "--drop-headers" => { export.include_headers = false; }
-
-            "--single" => { export.export_type = ExportType::SingleFile; }
-            "--per-team" => { export.export_type = ExportType::PerTeam; }
+            "-#" | "--nohash" => { export.keep_hash = false; }
+            "-x" | "--drop-headers" => { export.include_headers = false; }
+            "-m" | "--multi" | "--per-team" => { export.export_type = ExportType::PerTeam; }
 
             _ => return Err(format!("Unknown arg: {}", a).into()),
         }

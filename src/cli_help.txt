@@ -1,59 +1,67 @@
 Brutalball Scraper — CLI
 
 USAGE
-  bb_scrape                         Launch GUI
-  bb_scrape [OPTIONS]               Scrape & export via CLI
-  bb_scrape --list-teams            Print all team ids/names and exit
-  bb_scrape --help                  Show this help
+  ./cli                           Scrape all players & export to out/players/all.csv
+  ./cli [OPTIONS]                 Scrape & export with options
+  ./cli --h                       Show this help
+  ./cli --list-teams              Print all team ids/names and exit
 
 PAGES
-  --page players                    Which page to scrape (default: players) [more to be implemented]
+  -p, --page players              Which page to scrape (default: players)
 
 TEAM SELECTION (0–31)
-  -t, --team <id>                   Add a team id (repeatable)
-  --ids <list>                      Comma/range list (e.g. 0,2,5-7)
-                                    Ranges must be a<=b; values outside 0-31 are ignored
-                                    Repeated -t merge with --ids; result is sorted & deduped
+  -t, --team <id>                 Add a team id (repeatable)
+  -i, --ids <list>                Comma/range list (e.g. 0,2,5-7)
+                                  Ranges must be low to high; values outside 0-31 are ignored
+                                  -t and --ids can be combined
 
-OUTPUT
-  --single                          Export all rows to a single file (default)
-  --per-team                        Export one file per team into a directory
-  -o, --out <path>                  Single-file: file name or directory
-                                    Per-team:   directory
-                                    Hint: a trailing separator (…/ or …\) is treated as a directory hint
-  --format [csv|tsv]                Output format (default: csv)
-  --drop-headers                    Drop the header row
-  --nohash                          Remove the '#' from player numbers
+EXPORT
+  -f, --format [csv|tsv]          Output format (default: csv)
+  -x, --drop-headers              Drop the header row
+  -#, --nohash                    Remove the '#' from player numbers
+  -m, --multi, --per-team         Each team in a separate file, named <Team_Name>.extension
+  -o, --out <path>                Single-file: file name, or directory (with default file name)
+                                  Per-team:   directory
+                                  Anything with a trailing slash (…/ or …\) is treated as a directory.
 
 MISC
-  --list-teams                      Output "id  team" for all teams and exit
-  -h, --help                        This help
+  -l, --list-teams                Output "id  team" for all teams and exit
+  -h, --help                      This help
 
 NOTES
-  • Export-time flags (--include-headers, --keephash, --format) affect only the written files.
-  • Default locations:
-      cache: out/.store/
-      single-file default: out/players/all.csv          (or other extension as per format)
-      per-team default dir: out/players/
-  • Path handling is OS-native. Forward slashes are accepted on all platforms.
-  
+  • Defaults:
+      format: CSV
+      single-file: out/players/all.csv
+      per-team directory: out/players/<Team_Name>.extension
+      scraper behavior: all teams
+      export behavior: single file
+
   In single-file mode:
-    • "-o name" to specify filename only (uses default directory out/players)
-    • "-o dir/" to specify directory only (uses default filename all.csv)
-    • "-o dir/subdir/name.csv" to specify all
+    • "-o name" to specify filename only (uses default directory).
+    • "-o dir/" to specify directory only (uses default filename).
+    • "-o dir/subdir/" to specify subdirectory (uses default filename).
+    • "-o dir/subdir/name" to specify all.
+    • File extension is ignored. Use --format to set.
+
+  In multi-file mode:
+    • File names are the team names.
+    • "-o dir" to specify directory.
+    • "-o dir/subdir" to specify subdirectory.
 
 EXAMPLES
-  # Single team, single file (CSV)
-  bb_scrape --page players -t 3 --single
+  # All players to a single file hello.csv in default directory
+  cli -o hello
+
+  # Single team (id 3), single file (default, CSV)
+  cli -t 3
 
   # Two teams via repeated -t, per-team directory
-  bb_scrape --page players -t 1 -t 2 --per-team -o out/players/per
+  cli -t 1 -t 2 --per-team -o out/players/per
 
-  # Range + singles via --ids, per-team
-  bb_scrape --page players --ids 0-5,7,24 --per-team -o out/players/range
+  # Range + singles via --ids, --multi (same as --per-team)
+  cli --ids 0-5,7,24 --multi -o out/players/range
 
-  # TSV with headers and keeping '#', single file at custom path (ext comes from --format)
-  bb_scrape --page players --single --format tsv --include-headers --keephash -o out/custom/players.tsv
+  # TSV without headers and '#', single file at custom path → hello.tsv
+  cli --format tsv --drop-headers --nohash -o out/custom/hello
 
-  # Single-file with bare name: uses default directory, file name snapshot.csv
-  bb_scrape --page players --single -o snapshot
+  

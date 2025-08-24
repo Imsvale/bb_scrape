@@ -2,8 +2,17 @@
 
 [package]
 name = "bb_scrape"
-version = "0.3.0"
+version = "1.0.0"
 edition = "2024"
+authors = ["Imsvale"]
+description = "GUI + CLI scraper for Brutalball (teams, players, etc.)"
+license = "LICENSE-MIT"
+repository = "https://github.com/Imsvale/bb_scrape"
+homepage = "https://github.com/Imsvale/bb_scrape"
+readme = "README.md"
+keywords = ["scraper", "brutalball", "egui", "csv", "tsv", "rust-gui"]
+categories = ["command-line-utilities", "gui", "parsing"]
+default-run = "bb_scrape"
 build = "src/build.rs"
 
 [build-dependencies]
@@ -27,7 +36,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 color-eyre = { version = "0.6", optional = true }
 
 [[bin]]
-name = "bb_scrape_cli"      # CLI
+name = "cli"
 path = "src/bin/cli.rs"
 required-features = ["cli"]
 
@@ -35,8 +44,8 @@ required-features = ["cli"]
 cli = ["dep:color-eyre"]
 
 [profile.release]
-#lto = "thin"          # "fat" shrinks a bit more; slower compile
-#codegen-units = 1
+lto = "thin"          # "fat" shrinks a bit more; slower compile
+codegen-units = 1
 #panic = "abort"       # no unwinding machinery
-#opt-level = 3       # or "z" for min size; "3" if you want max perf
-#strip = "symbols"     # or "debuginfo"
+opt-level = "z"       # or "z" for min size; "3" if you want max perf
+strip = "symbols"     # or "debuginfo"
