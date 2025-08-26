@@ -2,10 +2,10 @@
 
 [package]
 name = "bb_scrape"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 authors = ["Imsvale"]
-description = "GUI + CLI scraper for Brutalball (teams, players, etc.)"
+description = "GUI + CLI scraper for Brutalball"
 license = "LICENSE-MIT"
 repository = "https://github.com/Imsvale/bb_scrape"
 homepage = "https://github.com/Imsvale/bb_scrape"
