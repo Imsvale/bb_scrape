@@ -6,25 +6,25 @@ A fast site scraper for Brutalball.
 
 ---
 
-## Download & Run
-
-* **Windows:** run `bb_scrape.exe` for the GUI.
-  Command-line users run `cli.exe`.
-* **Linux/macOS (from source):**
-  * Install Rust, then:
-  * Build GUI: `cargo build --release`
-  * Build CLI: `cargo build --release --bin cli --features=cli` (required)
-
 ### Quick start (Windows)
 
-1. **Download** `bb_scrape.exe`.
-1. **Move** it to a suitable folder.
-1. **Run** `bb_scrape.exe`.
-1. Click **SCRAPE**.
-1. `Copy` to clipboard.
-1. `Export` to file → `out/players/all.csv`.
+* **Download** the latest release, e.g. `bb_scrape_v1.1.0_windows_x86_64.zip`.
+* **Extract** it to a suitable folder.
+* **Run** `bb_scrape.exe` for the GUI.
+* Click **SCRAPE**.
+* `Copy` to clipboard.
+* `Export` to file → `out/players/all.csv`.
+*  Command-line users run `cli.exe`.
 
 Tip: The left panel lets you pick which teams to scrape.
+
+### Linux/macOS 
+
+**Build from source**:
+
+* Install Rust, then:
+* Build GUI: `cargo build --release`
+* Build CLI: `cargo build --release --bin cli --features=cli` (required)
 
 ---
 
@@ -80,40 +80,44 @@ Print help:
 Common flags:
 
 ```
+-h, --help                  Show help text
+-l, --list-teams            Print id and name for all teams
+
+SCRAPE:
 -p, --page players|teams    Which page to scrape (default: players)
--f, --format csv|tsv        Output format (default: csv)
--m, --multi, --per-team     Per-team files
 -t, --team <id>             One team by id (0–31)
--o, --out <path>            Output file path (single) or directory (per-team)
 -i, --ids <list>            Subset of ids, e.g. 0,2,5-7
+
+EXPORT:
+-m, --multi, --per-team     Per-team files
 -x, --drop-headers          Do not write the header row
 -#, --nohash                Strip '#' from player numbers (Players page only)
--l, --list-teams            Print "id,team" for all teams and exit
+-f, --format csv|tsv        Output format (default: csv)
+-o, --out <path>            Output file path (single) or directory (per-team)
 ```
 
 Examples:
 
 ```bash
-# All teams → single CSV (default path: out/players/all.csv)
-cli
+# One team (id 16 = BDP) → TSV
+./cli --team 16 --format tsv --out out/bdp.tsv
 
-# One team (id 0) → TSV with headers
-cli --team 0 --format tsv -o out/vuvu.tsv
+# Same as above with short-form flags
+./cli -t 16 -f tsv -o out/bdp.tsv
 
-# A subset of teams → per-team CSVs in a folder
-cli --ids 0,2,5-7 -o out/players
+# A subset of teams → per-team CSVs in a specified folder
+./cli --ids 0,2,5-7 -o out/week8
 
-# Teams list only
-cli --page teams -o out/teams.csv
+# Fetch and export team names and ids
+./cli --page teams -o out/teams.csv
 ```
 
 ---
 
 ### Caching & Refresh
 
-* The app stores raw datasets under `.store/`.
+* The app stores raw datasets under `.store`.
 * On startup, it loads the cache if present.
-* Team names can be force-refreshed by clicking Refresh.
 * Team names are refreshed with a **SCRAPE**.
 
 ---
