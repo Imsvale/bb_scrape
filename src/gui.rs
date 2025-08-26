@@ -27,11 +27,12 @@ use crate::{
     teams,
 };
 
-pub fn run(app_state: AppState, options: eframe::NativeOptions) -> Result<(), Box<dyn Error>> {
+pub fn run(options: eframe::NativeOptions) -> Result<(), Box<dyn Error>> {
+    
     eframe::run_native(
         "Brutalball Scraper",
         options,
-        Box::new(|_cc| Ok(Box::new(App::new(app_state)))),
+        Box::new(|_cc| Ok(Box::new(App::new(AppState::default())))),
     )?;
     Ok(())
 }
@@ -440,7 +441,7 @@ impl eframe::App for App {
                                 Ok(paths) => {
                                     if let Some(last) = paths.last() {
                                         *self.status.lock().unwrap() =
-                                            format!("Exported {} file(s), e.g. {}", paths.len(), last.display());
+                                            format!("Exported {} file(s). Last: {}", paths.len(), last.display());
                                     } else {
                                         *self.status.lock().unwrap() = "Export done".to_string();
                                     }

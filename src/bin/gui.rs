@@ -1,7 +1,6 @@
 // src/bin/gui.rs
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
-use bb_scrape::config::state::AppState;
-use bb_scrape::gui::run;
+use bb_scrape::gui;
 use eframe::egui::{ IconData, ViewportBuilder };
 
 fn app_icon() -> IconData {
@@ -22,7 +21,7 @@ fn main() {
         ..Default::default()
     };
 
-    if let Err(e) = run(AppState::default(), options) {
+    if let Err(e) = gui::run(options) {
         eprintln!("GUI failed: {}", e);
         std::process::exit(1);
     }

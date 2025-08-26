@@ -1,12 +1,12 @@
 // src/bin/cli.rs
-use bb_scrape::config::state::AppState;
-use bb_scrape::cli::run;
-
+use bb_scrape::cli;
 
 fn main() {
-    color_eyre::install().ok();
-    if let Err(e) = run(AppState::default()) {
-        eprintln!("Error: {}", e);
+    #[cfg(feature = "cli")]
+    { let _ = color_eyre::install(); }
+
+    if let Err(e) = cli::run() {
+        eprintln!("Error: {e}");
         std::process::exit(1);
     }
 }
