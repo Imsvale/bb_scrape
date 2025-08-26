@@ -8,7 +8,12 @@ use crate::{
 };
 use crate::config::{
     state::AppState,
-    options::{ PageKind::*, TeamSelector, ExportType, ExportFormat },
+    options::{ 
+        TeamSelector,
+        ExportType, 
+        ExportFormat,
+        PageKind::{ self, * },
+    },
 };
 
 pub enum Mode {
@@ -96,11 +101,7 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
 
             "-p" | "--page" => {
                 let v = args.next().ok_or("Missing value for --page")?;
-                scrape.page = match v.to_ascii_lowercase().as_str() {
-                    "players" => Players,
-                    "teams"   => Teams,
-                    other => return Err(format!("Unknown page: {}", other).into()),
-                };
+                scrape.page = PageKind::from_str(&v)?;
             }
 
             "-t" | "--team" => {
