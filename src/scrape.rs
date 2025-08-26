@@ -88,7 +88,7 @@ pub fn collect_players(
 
     // Spawn workers
 
-    for _ in 0..WORKERS {
+    for _ in 0..workers {
         let ids = Arc::clone(&ids_arc);
         let idx = Arc::clone(&counter);
         let tx = res_tx.clone();
