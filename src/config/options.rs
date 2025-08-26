@@ -1,6 +1,11 @@
 // src/config/options.rs
-use std::ffi::OsString;
-use std::path::{ Path, PathBuf };
+use std::{
+    path::{ Path, PathBuf },
+    ffi::OsString,
+    str,
+    fmt,
+};
+
 use super::consts::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,11 +35,66 @@ pub enum PageKind {
     Injuries,
 }
 
+impl str::FromStr for PageKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "teams"         => Ok(PageKind::Teams),
+            "players"       => Ok(PageKind::Players),
+            "seasonstats"   | "season_stats"   | "season-stats"   => Ok(PageKind::SeasonStats),
+            "careerstats"   | "career_stats"   | "career-stats"   => Ok(PageKind::CareerStats),
+            "gameresults"   | "game_results"   | "game-results"   => Ok(PageKind::GameResults),
+            "injuries"      => Ok(PageKind::Injuries),
+            other => Err(format!("Unknown page: {}", other)),
+        }
+    }
+}
+
+impl fmt::Display for PageKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            PageKind::Teams        => "teams",
+            PageKind::Players      => "players",
+            PageKind::SeasonStats  => "season-stats",
+            PageKind::CareerStats  => "career-stats",
+            PageKind::GameResults  => "game-results",
+            PageKind::Injuries     => "injuries",
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TeamSelector {
     All,
     One(u32),
     Ids(Vec<u32>),
+}
+
+impl TeamSelector {
+    pub fn add(&mut self, v: u32) {
+        match self {
+            TeamSelector::All => *self = TeamSelector::One(v),
+            TeamSelector::One(prev) => {
+                let p = *prev;
+                *self = TeamSelector::Ids(vec![p, v]);
+            }
+            TeamSelector::Ids(list) => list.push(v),
+        }
+    }
+
+    pub fn extend<I: IntoIterator<Item = u32>>(&mut self, iter: I) {
+        for v in iter {
+            self.add(v);
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        if let TeamSelector::Ids(list) = self {
+            list.sort_unstable();
+            list.dedup();
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,6 +127,7 @@ pub enum ExportFormat {
 }
 
 impl ExportFormat {
+
     pub fn ext(&self) -> &'static str {
         match self { 
             ExportFormat::Csv => "csv", 
@@ -84,6 +145,28 @@ impl ExportFormat {
     }
 }
 
+impl str::FromStr for ExportFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "csv" => Ok(ExportFormat::Csv),
+            "tsv" => Ok(ExportFormat::Tsv),
+            other => Err(format!("Unknown format: {}", other)),
+        }
+    }
+}
+
+impl fmt::Display for ExportFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            match self {
+                ExportFormat::Csv => "csv",
+                ExportFormat::Tsv => "tsv",
+            }
+        )
+    }
+}
 
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -127,6 +210,12 @@ impl ExportOptions {
     /// Parse a user-provided path string into {dir, stem}.
     /// In SingleFile, ignores any pasted extension (format controls it).
     pub fn set_path(&mut self, text: &str) {
+
+        fn normalize_dir_like(p: &Path) -> PathBuf {
+            // Rebuild the path from components → uses platform separator
+            p.components().collect()
+        }
+
         let s = text.trim();
 
         match self.export_type {
@@ -135,7 +224,7 @@ impl ExportOptions {
                 if let Some(parent) = p.parent() {
                     // If there's no parent (e.g. "all"), leave dir as-is
                     if !parent.as_os_str().is_empty() {
-                        self.out_path.dir = parent.to_path_buf();
+                        self.out_path.dir = normalize_dir_like(parent);
                     }
                 }
                 if let Some(stem) = p.file_stem() {
@@ -144,7 +233,7 @@ impl ExportOptions {
             }
             ExportType::PerTeam => {
                 if !s.is_empty() {
-                    self.out_path.dir = PathBuf::from(s);
+                    self.out_path.dir = normalize_dir_like(Path::new(s));
                 }
             }
         }

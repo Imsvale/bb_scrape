@@ -1,5 +1,6 @@
 // src/cli.rs
 use std::{env, path::PathBuf};
+use std::str::FromStr;
 
 use crate::{ 
     file,
@@ -7,7 +8,7 @@ use crate::{
 };
 use crate::config::{
     state::AppState,
-    options::{ PageKind, TeamSelector, ExportType, ExportFormat },
+    options::{ PageKind::*, TeamSelector, ExportType, ExportFormat },
 };
 
 pub enum Mode {
@@ -15,29 +16,19 @@ pub enum Mode {
     Gui(AppState),
 }
 
-// Decide CLI vs GUI
-pub fn detect_mode() -> Result<Mode, Box<dyn std::error::Error>> {
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+
     let mut app_state = AppState::default();
-
-    if env::args().len() == 1 {
-        // only program name
-        return Ok(Mode::Gui(app_state));
-    }
-
     parse_cli(&mut app_state)?;
-    Ok(Mode::Cli(app_state))
-}
-
-pub fn run(app_state: AppState) -> Result<(), Box<dyn std::error::Error>> {
-
+    
     let scrape = &app_state.options.scrape;
     let options = &app_state.options;
 
     // 1) SCRAPE
     let mut progress = CliProgress::default();
-    let ds = scrape::run(&scrape, Some(&mut progress))?;
+    let ds = scrape::run(scrape, Some(&mut progress))?;
 
-    // 2) PAGE-SPECIFIC EXPORT DECISIONS
+    // 2) Cache the dataset (best-effort)
     let _ = crate::store::save_dataset(&scrape.page, &crate::store::DataSet {
         headers: ds.headers.clone(),
         rows: ds.rows.clone(),
@@ -45,25 +36,42 @@ pub fn run(app_state: AppState) -> Result<(), Box<dyn std::error::Error>> {
 
     // 3) Export according to ExportOptions
     let export = &app_state.options.export;
-    let written: Vec<PathBuf> = match export.export_type {
+
+    // Per-team only makes sense for pages that can be split into team-wise data
+    // For now just Players
+    // Later also Career and Season stats, maybe even Game Results and Injuries
+    // So potentially all except the Teams list
+    let (effective_export_type, team_col) = match scrape.page {
+        Players => (export.export_type, Some(3usize)),
+        _ if matches!(export.export_type, ExportType::PerTeam) => {
+            eprintln!("Per-team export is only supported for the Players page; writing a single file instead.");
+            (ExportType::SingleFile, None)
+        }
+        _ => (export.export_type, None),
+    };
+
+    let written: Vec<PathBuf> = match effective_export_type {
         ExportType::SingleFile => {
             file::write_export_single(options, &ds.headers, &ds.rows)
                 .map(|p| vec![p])?
         }
         ExportType::PerTeam => {
-            // Players page: "Team" column index = 3
-            file::write_export_per_team(options, &ds.headers, &ds.rows, 3)?
+            // safe: only reached for Players due to guard above
+            file::write_export_per_team(options, &ds.headers, &ds.rows, team_col.unwrap())?
         }
     };
 
-    if let Some(last) = written.last() {
-        eprintln!("Exported {} file(s), e.g. {}", written.len(), last.display());
+    if written.is_empty() {
+        eprintln!("Nothing to export.");
+    } else if let Some(last) = written.last() {
+        eprintln!("Exported {} file(s). Last: {}", written.len(), last.display());
     } else {
         eprintln!("Export done.");
     }
 
     Ok(())
 }
+
 
 fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
@@ -89,8 +97,8 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
             "-p" | "--page" => {
                 let v = args.next().ok_or("Missing value for --page")?;
                 scrape.page = match v.to_ascii_lowercase().as_str() {
-                    "players" => PageKind::Players,
-                    "teams"   => PageKind::Teams,
+                    "players" => Players,
+                    "teams"   => Teams,
                     other => return Err(format!("Unknown page: {}", other).into()),
                 };
             }
@@ -98,18 +106,13 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
             "-t" | "--team" => {
                 let v: u32 = args.next().ok_or("Missing team id")?.parse()?;
                 if v >= 32 { return Err("Team ID out of range (0-31)".into()); }
-                // Merge into selection: All -> One, One -> Ids, Ids -> push
-                scrape.teams = match &mut scrape.teams {
-                    TeamSelector::All => TeamSelector::One(v),
-                    TeamSelector::One(prev) => TeamSelector::Ids(vec![*prev, v]),
-                    TeamSelector::Ids(list) => { list.push(v); TeamSelector::Ids(list.clone()) }
-                };
+                scrape.teams.add(v);
             }
 
             "-i" | "--ids" => {
                 let v = args.next().ok_or("Missing value for --ids")?;
                 let list = parse_ids_list(&v)?;
-                scrape.teams = TeamSelector::Ids(list);
+                scrape.teams.extend(list);
             }
 
             "-o" | "--out" => {
@@ -119,13 +122,7 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
 
             "-f" | "--format" => {
                 let v = args.next().ok_or("Missing value for --format")?;
-                export.format = match v.to_ascii_lowercase().as_str() {
-                    "csv" => ExportFormat::Csv,
-                    "tsv" => ExportFormat::Tsv,
-                    // "json" => ExportFormat::Json,
-                    // "toml" => ExportFormat::Toml,
-                    other => return Err(format!("Unknown format: {}", other).into()),
-                };
+                export.format = ExportFormat::from_str(&v)?;
             }
 
             "-#" | "--nohash" => { export.keep_hash = false; }
@@ -136,11 +133,8 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
         }
     }
 
-    // If we merged via multiple -t flags, ensure Ids are deduped and sorted
-    if let TeamSelector::Ids(ref mut list) = scrape.teams {
-        list.sort_unstable();
-        list.dedup();
-    }
+    // Sort and dedup
+    scrape.teams.normalize();
 
     Ok(())
 }
