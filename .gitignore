@@ -11,8 +11,10 @@
 Thumbs.db
 
 # App artifacts
+.cargo/config.toml
 /out/
 /.store/
 gfx/
 *.exe
 *.zip
+/SHA256SUMS.txt
