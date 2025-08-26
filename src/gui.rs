@@ -223,14 +223,14 @@ impl eframe::App for App {
                     self.set_selection_message();
                 }
 
-                if ui.button("Refresh").clicked() {
-                    if self.teams[0].1 == "Vuvu Boys" { 
-                        self.teams = (0u32..32).map(|id| (id, format!("Team {}", id))).collect();
-                    } else {
-                        self.teams = teams::refresh().unwrap();
-                    }
+                // if ui.button("Refresh").clicked() {
+                //     if self.teams[0].1 == "Vuvu Boys" { 
+                //         self.teams = (0u32..32).map(|id| (id, format!("Team {}", id))).collect();
+                //     } else {
+                //         self.teams = teams::refresh().unwrap();
+                //     }
                     
-                }
+                // }
             });
             ui.separator();
 
