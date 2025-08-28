@@ -5,9 +5,14 @@ use std::{
 };
 
 use crate::{
-    config::consts::{ WORKERS, REQUEST_PAUSE_MS, JITTER_MS },
-    specs, teams, progress::Progress, store::{ self, DataSet },
     config::options::{PageKind::*, ScrapeOptions, TeamSelector},
+    config::consts::{ WORKERS, REQUEST_PAUSE_MS, JITTER_MS },
+
+    progress::Progress, 
+    store::{ self, DataSet },
+
+    specs, 
+    teams, 
 };
 
 /// Top-level: dispatch on page kind and collect data (no IO).
@@ -17,11 +22,11 @@ pub fn run(
 ) -> Result<DataSet, Box<dyn Error>> {
     match scrape.page {
         // PageKind::Teams         => collect_teams(),
-        Teams         => collect_teams_with_progress(progress),
+        Teams         => collect_teams(progress),
         Players       => collect_players(scrape, progress),
         SeasonStats   => todo!(),
         CareerStats   => todo!(),
-        GameResults   => todo!(),
+        GameResults   => collect_game_results(),
         Injuries      => todo!(),
     }
 }
@@ -34,12 +39,7 @@ fn resolve_ids(sel: &TeamSelector) -> Vec<u32> {
     }
 }
 
-fn collect_teams() -> Result<DataSet, Box<dyn Error>> {
-    let bundle = specs::teams::fetch()?;
-    Ok(DataSet { headers: bundle.headers, rows: bundle.rows })
-}
-
-fn collect_teams_with_progress(mut progress: Option<&mut dyn Progress>)
+fn collect_teams(mut progress: Option<&mut dyn Progress>)
     -> Result<DataSet, Box<dyn Error>>
 {
     if let Some(p) = progress.as_deref_mut() {
@@ -155,11 +155,16 @@ pub fn collect_players(
 /* ---------------- Team-list helper (GUI/CLI can call) ---------------- */
 
 pub fn list_teams() -> Vec<(u32, String)> {
-    match crate::teams::load() {
+    match teams::load() {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Warning: could not load team list: {}", e);
             (0u32..32).map(|id| (id, format!("Team {}", id))).collect()
         }
     }
+}
+
+fn collect_game_results() -> Result<DataSet, Box<dyn Error>> {
+    let bundle = specs::game_results::fetch()?;
+    Ok(DataSet { headers: bundle.headers, rows: bundle.rows })
 }

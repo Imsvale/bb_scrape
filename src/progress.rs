@@ -1,4 +1,5 @@
 // src/progress.rs
+
 /// Lightweight progress reporting used by long-running operations (scrape/export).
 /// Frontends (GUI/CLI) implement this to surface status to users.
 pub trait Progress {

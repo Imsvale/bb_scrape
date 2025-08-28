@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::file::{parse_rows, write_row};
-use crate::config::options::PageKind;
+use crate::config::options::PageKind::{self, *};
 use crate::config::consts::{STORE_DIR, STORE_SEP};
 
 /// Load cached dataset for a given page (if present).
@@ -58,12 +58,12 @@ fn store_path(kind: &PageKind) -> PathBuf {
 
 fn page_filename(kind: &PageKind) -> &'static str {
     match kind {
-        PageKind::Teams         => "teams",
-        PageKind::Players       => "players",
-        PageKind::SeasonStats   => "season_stats",
-        PageKind::CareerStats   => "career_stats",
-        PageKind::Injuries      => "injuries",
-        PageKind::GameResults   => "game_results",
+        Teams         => "teams",
+        Players       => "players",
+        SeasonStats   => "season_stats",
+        CareerStats   => "career_stats",
+        Injuries      => "injuries",
+        GameResults   => "game_results",
     }
 }
 
