@@ -18,3 +18,6 @@ gfx/
 *.exe
 *.zip
 /SHA256SUMS.txt
+src/gui/config.rs
+src/gui/gui_old.rs
+src/gui/table_model.rs
