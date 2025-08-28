@@ -73,3 +73,72 @@ pub struct DataSet {
     pub rows: Vec<Vec<String>>,
 }
 
+// ---- New common helpers on DataSet ----
+
+use crate::gui::pages::Page;
+
+impl DataSet {
+    pub fn header_index(&self, name: &str) -> Option<usize> {
+        self.headers.as_ref()?.iter()
+            .position(|s| s.eq_ignore_ascii_case(name))
+    }
+
+    pub fn ensure_rectangular(&self, n: usize) -> bool {
+        self.rows.iter().all(|r| r.len() == n)
+            && self.headers.as_ref().map(|h| h.len() == n).unwrap_or(true)
+    }
+
+    pub fn indexes_filtered_by_selection(
+        &self,
+        page: &dyn Page,
+        selected_team_ids: &[u32],
+        teams: &[(u32, String)],
+    ) -> Vec<usize> {
+        // Reuse your existing page filter but return indexes to avoid cloning.
+        let mut ix = Vec::with_capacity(self.rows.len());
+        for (i, row) in self.rows.iter().enumerate() {
+            // Quick path by sharing the predicate:
+            // If you want max reuse, expose page.filter_predicate(...) and call it here.
+            // For now, keep it simple:
+            let tmp = vec![row.clone()];
+            if !page.filter_rows_for_selection(selected_team_ids, teams, &tmp).is_empty() {
+                ix.push(i);
+            }
+        }
+        ix
+    }
+
+    pub fn project_columns(&self, keep: &[usize]) -> DataSet {
+        let headers = self.headers.as_ref().map(|h| {
+            keep.iter().filter_map(|&i| h.get(i).cloned()).collect()
+        });
+        let rows = self.rows.iter().map(|r| {
+            keep.iter().filter_map(|&i| r.get(i).cloned()).collect()
+        }).collect();
+        DataSet { headers, rows }
+    }
+
+    /// Returns headers or the page's default/fallback headers if none present.
+    pub fn headers_or_defaults(&self, page: &dyn Page) -> Option<Vec<String>> {
+        match &self.headers {
+            Some(h) => Some(h.clone()),
+            None => page
+                .default_headers()
+                .map(|hs| hs.iter().map(|s| s.to_string()).collect()),
+        }
+    }
+
+    /// Apply the page's team selection filter to rows.
+    pub fn rows_filtered_by_selection(
+        &self,
+        page: &dyn Page,
+        selected_team_ids: &[u32],
+        teams: &[(u32, String)],
+    ) -> Vec<Vec<String>> {
+        page.filter_rows_for_selection(selected_team_ids, teams, &self.rows)
+    }
+
+    /// Convenience counters.
+    pub fn row_count(&self) -> usize { self.rows.len() }
+    pub fn header_count(&self) -> usize { self.headers.as_ref().map(|h| h.len()).unwrap_or(0) }
+}

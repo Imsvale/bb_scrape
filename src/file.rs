@@ -53,9 +53,13 @@ pub fn parse_rows(text: &str, sep: char) -> Vec<Vec<String>> {
         }
     }
 
-    // Flush any trailing field/row even if quotes were unterminated.
+    // Flush the trailing field/row — but ignore a trailing blank line.
+    if in_quotes {
+        // Unterminated quotes: behave like “end of line” to avoid data loss.
+        // (Same behavior as before; we still don’t create a spurious empty row.)
+    }
     row.push(field);
-    if !row.is_empty() {
+    if !row.is_empty() && !(row.len() == 1 && row[0].is_empty()) {
         rows.push(row);
     }
 

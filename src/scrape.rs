@@ -15,22 +15,6 @@ use crate::{
     teams, 
 };
 
-/// Top-level: dispatch on page kind and collect data (no IO).
-pub fn run(
-    scrape: &ScrapeOptions,
-    progress: Option<&mut dyn Progress>,
-) -> Result<DataSet, Box<dyn Error>> {
-    match scrape.page {
-        // PageKind::Teams         => collect_teams(),
-        Teams         => collect_teams(progress),
-        Players       => collect_players(scrape, progress),
-        SeasonStats   => todo!(),
-        CareerStats   => todo!(),
-        GameResults   => collect_game_results(),
-        Injuries      => todo!(),
-    }
-}
-
 fn resolve_ids(sel: &TeamSelector) -> Vec<u32> {
     match sel {
         TeamSelector::All     => (0..32).collect(),
@@ -39,7 +23,17 @@ fn resolve_ids(sel: &TeamSelector) -> Vec<u32> {
     }
 }
 
-fn collect_teams(mut progress: Option<&mut dyn Progress>)
+pub fn list_teams() -> Vec<(u32, String)> {
+    match teams::load() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Warning: could not load team list: {}", e);
+            (0u32..32).map(|id| (id, format!("Team {}", id))).collect()
+        }
+    }
+}
+
+pub fn collect_teams(mut progress: Option<&mut dyn Progress>)
     -> Result<DataSet, Box<dyn Error>>
 {
     if let Some(p) = progress.as_deref_mut() {
@@ -152,19 +146,15 @@ pub fn collect_players(
     Ok(DataSet { headers, rows })
 }
 
-/* ---------------- Team-list helper (GUI/CLI can call) ---------------- */
+pub fn collect_game_results(mut progress: Option<&mut dyn Progress>,) -> Result<DataSet, Box<dyn Error>> {
 
-pub fn list_teams() -> Vec<(u32, String)> {
-    match teams::load() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Warning: could not load team list: {}", e);
-            (0u32..32).map(|id| (id, format!("Team {}", id))).collect()
-        }
+    if let Some(p) = progress.as_deref_mut() {
+        p.log("Fetching game results...");
     }
-}
-
-fn collect_game_results() -> Result<DataSet, Box<dyn Error>> {
     let bundle = specs::game_results::fetch()?;
+
+    if let Some(p) = progress.as_deref_mut() {
+        p.finish();
+    }
     Ok(DataSet { headers: bundle.headers, rows: bundle.rows })
 }

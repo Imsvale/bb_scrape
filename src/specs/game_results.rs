@@ -86,11 +86,11 @@ pub fn fetch() -> Result<GameResultsBundle, Box<dyn Error>> {
 
     Ok(GameResultsBundle {
         headers: Some(vec![
-            s!("Season"),
-            s!("Week"),
+            s!("S"),
+            s!("W"),
             s!("Home team"),
-            s!("Home result"),
-            s!("Away result"),
+            s!("Home"),
+            s!("Away"),
             s!("Away team"),
             s!("Match id"),
         ]),
@@ -177,7 +177,7 @@ fn extract_side(td_block: &str, home: bool) -> (String, String) {
             let clean = normalize_ws(&strip_tags(normalize_entities(&a_inner)));
             clean
         } else {
-            s!("")
+            s!()
         }
     };
 

@@ -1,36 +1,41 @@
 // src/gui/pages/players.rs
 use eframe::egui;
+use std::error::Error;
+use std::collections::HashSet;
 
 use crate::{
-    config::options::PageKind,
+    config::options::PageKind::{ self, * },
+    config::state::AppState,
     progress::Progress,
     scrape,
     store::DataSet,
 };
 
-use super::{ AppCtx, Page };
+use super::{ Page };
 
 pub struct PlayersPage;
 pub static PAGE: PlayersPage = PlayersPage;
 
 impl Page for PlayersPage {
-    fn kind(&self) -> PageKind { PageKind::Players }
-    fn label(&self) -> &'static str { "Players" }
+    fn kind(&self) -> PageKind { Players }
+    fn title(&self) -> &'static str { "Players" }
 
-    fn draw_controls(&self, ui: &mut egui::Ui, ctx: &mut AppCtx) {
+    fn draw_controls(&self, ui: &mut egui::Ui, state: &mut AppState) -> bool {
         // Players-only toggle: Keep '#'
-        ui.checkbox(
-            &mut ctx.app_state.options.export.keep_hash,
-            "Keep # in player number",
-        );
+        let mut changed = false;
+        changed |= ui.checkbox(
+            &mut state.options.export.keep_hash,
+            "Keep # in player number")
+            .changed();
+        changed
     }
 
     fn scrape(
         &self,
-        ctx: &AppCtx,
+        state: &AppState,
         progress: Option<&mut dyn Progress>,
-    ) -> Result<DataSet, Box<dyn std::error::Error>> {
-        let ds = scrape::collect_players(&ctx.app_state.options.scrape, progress)?;
+    ) -> Result<DataSet, Box<dyn Error>> {
+        let ds = scrape::collect_players(&state.options.scrape, progress)?;
         Ok(ds)
     }
 
@@ -43,7 +48,7 @@ impl Page for PlayersPage {
         }
 
         // Which teams did this scrape cover?
-        use std::collections::HashSet;
+        
         let mut scraped_teams: HashSet<String> = HashSet::new();
         for r in &new.rows {
             if let Some(t) = r.get(TEAM_COL) {

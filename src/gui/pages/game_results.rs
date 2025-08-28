@@ -3,22 +3,23 @@ use std::collections::HashSet;
 use eframe::egui;
 
 use crate::config::options::PageKind;
+use crate::config::state::AppState;
 use crate::progress::Progress;
 use crate::store::DataSet;
 use crate::scrape;
 
-use super::{AppCtx, Page};
+use super::Page;
 
 pub struct GameResultsPage;
 
 pub static PAGE: GameResultsPage = GameResultsPage;
 
 const HEADERS: [&str; 7] = [
-    "Season","Week","Home team","Home result","Away result","Away team","Match id"
+    "S","W","Home team","Home","Away","Away team","Match id"
 ];
 
 impl Page for GameResultsPage {
-    fn label(&self) -> &'static str { "Game Results" }
+    fn title(&self) -> &'static str { "Game Results" }
     fn kind(&self) -> PageKind { PageKind::GameResults }
 
     fn default_headers(&self) -> Option<&'static [&'static str]> {
@@ -27,30 +28,34 @@ impl Page for GameResultsPage {
 
     fn preferred_column_widths(&self) -> Option<&'static [usize]> {
         // Season, Week, Home Team, Home, Away, Away Team, Match id
-        Some(&[52, 44, 200, 72, 72, 200, 92])
+        Some(&[25, 25, 200, 30, 30, 200, 92])
     }
 
-    fn draw_controls(&self, ui: &mut egui::Ui, ctx: &mut AppCtx) {
+    fn draw_controls(&self, ui: &mut egui::Ui, state: &mut AppState) -> bool {
         // Page-specific toggles
+        let mut changed = false;
         ui.horizontal(|ui| {
-            ui.label("Columns:");
-            ui.checkbox(&mut ctx.app_state.gui.game_results_show_match_id, "Include match id");
+            changed |= ui.checkbox(
+                &mut state.gui.game_results_show_match_id, 
+                "Include match id")
+                .changed();
         });
+        changed
     }
 
     fn scrape(
         &self,
-        ctx: &AppCtx,
+        _state: &AppState,
         progress: Option<&mut dyn Progress>,
     ) -> Result<DataSet, Box<dyn Error>> {
         // Use the top-level router to run the correct scraper
-        let ds = scrape::run(&ctx.app_state.options.scrape, progress)?;
+        let ds = scrape::collect_game_results(progress)?;
         Ok(ds)
     }
 
     fn key_column(&self) -> Option<usize> { Some(6) }
 
-    fn merge(&self, into: &mut DataSet, mut new: DataSet) {
+    fn merge(&self, into: &mut DataSet, new: DataSet) {
         const KEY: usize = 6;
 
         // 1) Headers: adopt if ours are missing
@@ -156,36 +161,14 @@ impl Page for GameResultsPage {
         filtered
     }
 
-    fn view_for_display(
-        &self,
-        ctx: &AppCtx,
-        headers: &Option<Vec<String>>,
-        rows: &Vec<Vec<String>>,
-    ) -> (Option<Vec<String>>, Vec<Vec<String>>) {
-        if ctx.app_state.gui.game_results_show_match_id {
-            return (headers.clone(), rows.clone());
-        }
-        let new_headers = headers.as_ref().map(|hs| {
-            let mut h = hs.clone();
-            if !h.is_empty() { h.pop(); }
-            h
-        });
-        let new_rows = rows.iter().map(|r| {
-            let mut c = r.clone();
-            if !c.is_empty() { c.pop(); }
-            c
-        }).collect();
-        (new_headers, new_rows)
-    }
-
     fn view_for_export(
         
         &self,
-        ctx: &AppCtx,
+        state: &AppState,
         headers: &Option<Vec<String>>,
         rows: &Vec<Vec<String>>,
     ) -> (Option<Vec<String>>, Vec<Vec<String>>) {
-        if ctx.app_state.gui.game_results_show_match_id {
+        if state.gui.game_results_show_match_id {
             return (headers.clone(), rows.clone());
         }
         // Drop the last column from headers + rows if present
@@ -201,4 +184,12 @@ impl Page for GameResultsPage {
         }).collect();
         (new_headers, new_rows)
     }
+
+    fn validate_cache(&self, ds: &DataSet) -> bool {
+        // Allow blank. Otherwise require exactly 7 columns in headers+rows.
+        let hdr_ok = ds.headers.as_ref().map(|h| h.len() == 7).unwrap_or(true);
+        let rows_ok = ds.rows.iter().all(|r| r.len() == 7);
+        hdr_ok && rows_ok
+    }
+
 }

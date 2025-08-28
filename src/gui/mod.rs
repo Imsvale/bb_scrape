@@ -1,5 +1,6 @@
 // src/gui/mod.rs
 pub mod app;
+pub mod components;
 pub mod router;
 pub mod pages;
 pub mod progress;

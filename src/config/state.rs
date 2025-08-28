@@ -1,4 +1,4 @@
-// src/config/app_state.rs
+// src/config/state.rs
 use super::options::AppOptions;
 
 #[derive(Clone, Debug)]
