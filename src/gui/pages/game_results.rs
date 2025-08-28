@@ -53,40 +53,79 @@ impl Page for GameResultsPage {
     fn merge(&self, into: &mut DataSet, mut new: DataSet) {
         const KEY: usize = 6;
 
-        // Prefer fresh headers when provided.
-        if new.headers.is_some() {
-            into.headers = new.headers.take();
+        // 1) Headers: adopt if ours are missing
+        if into.headers.is_none() && new.headers.is_some() {
+            into.headers = new.headers;
         }
 
+        // 2) Build indexes on existing rows:
         use std::collections::HashMap;
-        // Build a map of existing rows keyed by match id.
-        let mut by_id: HashMap<String, Vec<String>> =
-            HashMap::with_capacity(into.rows.len().saturating_add(new.rows.len()));
 
-        for r in std::mem::take(&mut into.rows) {
-            if let Some(k) = r.get(KEY).cloned() {
-                by_id.insert(k, r);
+        // by ID (only for rows that already have an ID)
+        let mut by_id: HashMap<String, usize> = HashMap::new();
+
+        // provisional index: (season, week, home, away) -> row index
+        // only for rows that DON'T have an ID yet
+        let mut provisional: HashMap<(String, String, String, String), usize> = HashMap::new();
+
+        for (i, r) in into.rows.iter().enumerate() {
+            let id = r.get(KEY).map(|s| s.as_str()).unwrap_or("");
+            if !id.is_empty() {
+                by_id.insert(id.to_string(), i);
+            } else {
+                // only index rows lacking an id
+                let k = (
+                    r.get(0).cloned().unwrap_or_default(), // season
+                    r.get(1).cloned().unwrap_or_default(), // week
+                    r.get(2).cloned().unwrap_or_default(), // home
+                    r.get(5).cloned().unwrap_or_default(), // away
+                );
+                provisional.insert(k, i);
             }
         }
 
-        // Upsert new rows by the same key.
+        // 3) Integrate new rows
         for r in new.rows {
-            if let Some(k) = r.get(KEY).cloned() {
-                by_id.insert(k, r); // replace if exists, insert if not
+            let id = r.get(KEY).map(|s| s.as_str()).unwrap_or("");
+
+            if !id.is_empty() {
+                // prefer ID upsert
+                if let Some(&idx) = by_id.get(id) {
+                    into.rows[idx] = r;
+                    continue;
+                }
+                // otherwise try promoting a provisional match
+                let k = (
+                    r.get(0).cloned().unwrap_or_default(),
+                    r.get(1).cloned().unwrap_or_default(),
+                    r.get(2).cloned().unwrap_or_default(),
+                    r.get(5).cloned().unwrap_or_default(),
+                );
+                if let Some(&idx) = provisional.get(&k) {
+                    into.rows[idx] = r;
+                    // row now has an ID; our provisional index is stale, but
+                    // we don't need it after the merge pass, so we don't rebalance it.
+                    continue;
+                }
+                // brand new game with ID
+                by_id.insert(id.to_string(), into.rows.len());
+                into.rows.push(r);
+            } else {
+                // No ID yet: use/replace provisional row if present; else append
+                let k = (
+                    r.get(0).cloned().unwrap_or_default(),
+                    r.get(1).cloned().unwrap_or_default(),
+                    r.get(2).cloned().unwrap_or_default(),
+                    r.get(5).cloned().unwrap_or_default(),
+                );
+                if let Some(&idx) = provisional.get(&k) {
+                    into.rows[idx] = r;
+                } else {
+                    provisional.insert(k, into.rows.len());
+                    into.rows.push(r);
+                }
             }
         }
-
-        // Rebuild rows in a deterministic order: (Season asc, Week asc).
-        let mut rows: Vec<Vec<String>> = by_id.into_values().collect();
-        rows.sort_by(|a, b| {
-            let sa = a.get(0).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
-            let sb = b.get(0).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
-            let wa = a.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
-            let wb = b.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
-            (sa, wa).cmp(&(sb, wb))
-        });
-
-        into.rows = rows;
     }
 
     fn filter_rows_for_selection(
