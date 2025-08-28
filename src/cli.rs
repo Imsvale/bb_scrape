@@ -1,19 +1,22 @@
 // src/cli.rs
 use std::{env, path::PathBuf};
 use std::str::FromStr;
+use std::error::Error;
 
 use crate::{ 
     file,
     scrape,
 };
-use crate::config::{
-    state::AppState,
-    options::{ 
-        TeamSelector,
-        ExportType, 
-        ExportFormat,
-        PageKind::{ self, * },
-    },
+use crate::{
+    store::{ self, DataSet },
+    config::{
+        state::AppState, 
+        options::{ 
+            ExportType::*, 
+            ExportFormat, 
+            PageKind::{ self, * }
+        },
+    }
 };
 
 pub enum Mode {
@@ -21,7 +24,7 @@ pub enum Mode {
     Gui(AppState),
 }
 
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run() -> Result<(), Box<dyn Error>> {
 
     let mut app_state = AppState::default();
     parse_cli(&mut app_state)?;
@@ -31,10 +34,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1) SCRAPE
     let mut progress = CliProgress::default();
-    let ds = scrape::run(scrape, Some(&mut progress))?;
+
+    let ds = match scrape.page {
+        Players => scrape::collect_players(scrape, Some(&mut progress))?,
+        Teams => scrape::collect_teams(Some(&mut progress))?,
+        GameResults => scrape::collect_game_results(Some(&mut progress))?,
+        SeasonStats => todo!("CLI: SeasonStats scraper not implemented yet"),
+        CareerStats => todo!("CLI: CareerStats scraper not implemented yet"),
+        Injuries => todo!("CLI: Injuries scraper not implemented yet"),
+    };
 
     // 2) Cache the dataset (best-effort)
-    let _ = crate::store::save_dataset(&scrape.page, &crate::store::DataSet {
+    let _ = store::save_dataset(&scrape.page, &DataSet {
         headers: ds.headers.clone(),
         rows: ds.rows.clone(),
     });
@@ -48,19 +59,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // So potentially all except the Teams list
     let (effective_export_type, team_col) = match scrape.page {
         Players => (export.export_type, Some(3usize)),
-        _ if matches!(export.export_type, ExportType::PerTeam) => {
+        _ if matches!(export.export_type, PerTeam) => {
             eprintln!("Per-team export is only supported for the Players page; writing a single file instead.");
-            (ExportType::SingleFile, None)
+            (SingleFile, None)
         }
         _ => (export.export_type, None),
     };
 
     let written: Vec<PathBuf> = match effective_export_type {
-        ExportType::SingleFile => {
+        SingleFile => {
             file::write_export_single(options, &ds.headers, &ds.rows)
                 .map(|p| vec![p])?
         }
-        ExportType::PerTeam => {
+        PerTeam => {
             // safe: only reached for Players due to guard above
             file::write_export_per_team(options, &ds.headers, &ds.rows, team_col.unwrap())?
         }
@@ -78,7 +89,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 
-fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>> {
+fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
 
     // IMPORTANT: mutate the real structs, not copies
@@ -93,7 +104,7 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
             }
 
             "-l" | "--list-teams" => {
-                for (id, name) in crate::scrape::list_teams() {
+                for (id, name) in scrape::list_teams() {
                     println!("{:2}  {}", id, name);
                 }
                 std::process::exit(0);
@@ -128,7 +139,7 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
 
             "-#" | "--nohash" => { export.keep_hash = false; }
             "-x" | "--drop-headers" => { export.include_headers = false; }
-            "-m" | "--multi" | "--per-team" => { export.export_type = ExportType::PerTeam; }
+            "-m" | "--multi" | "--per-team" => { export.export_type = PerTeam; }
 
             _ => return Err(format!("Unknown arg: {}", a).into()),
         }
@@ -140,7 +151,7 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-fn parse_ids_list(s: &str) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
+fn parse_ids_list(s: &str) -> Result<Vec<u32>, Box<dyn Error>> {
     let mut out = Vec::new();
     for part in s.split(',') {
         let part = part.trim();
