@@ -206,17 +206,24 @@ impl ExportOptions {
             SingleFile => {
                 // Build "<stem>.<ext>" in OsString to avoid UTF-8 loss
                 let mut file_name: OsString = self.out_path.file_stem.clone();
-                file_name.push(".");
-                file_name.push(self.format.ext()); // ext is &str (ASCII), fine to push
+                // Extension precedence: user-chosen > format default
+                let ext_str = self.out_path.file_ext
+                    .as_ref()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or(self.format.ext());
+                if !ext_str.is_empty() {
+                    file_name.push(".");
+                    file_name.push(ext_str);
+                }
                 path.push(PathBuf::from(&file_name))
             }
-            PerTeam => { /* directory only */},
+            PerTeam => { /* directory only */ }
         }
         path
     }
 
-    /// Parse a user-provided path string into {dir, stem}.
-    /// In SingleFile, ignores any pasted extension (format controls it).
+    /// Parse a user-provided path string into {dir, stem, ext?}.
+    /// In SingleFile, now **respects** a pasted extension (stores it).
     pub fn set_path(&mut self, text: &str) {
 
         fn normalize_dir_like(p: &Path) -> PathBuf {
@@ -238,6 +245,8 @@ impl ExportOptions {
                 if let Some(stem) = p.file_stem() {
                     self.out_path.file_stem = stem.to_os_string();
                 }
+                // Respect user-provided extension if present; otherwise leave as-is
+                self.out_path.file_ext = p.extension().map(|e| e.to_os_string());
             }
             PerTeam => {
                 if !s.is_empty() {
@@ -248,12 +257,59 @@ impl ExportOptions {
     }
 
     pub fn delimiter(&self) -> Option<char> { self.format.delimiter() }
+
+    /// Default DIR for a page (public, so UI can reason about defaults).
+    pub fn default_dir_for(kind: PageKind) -> PathBuf {
+        let sub = match kind {
+            PageKind::Players     => DEFAULT_PLAYERS_SUBDIR,
+            PageKind::GameResults => DEFAULT_RESULTS_SUBDIR,
+            _ => DEFAULT_PLAYERS_SUBDIR, // extend as needed
+        };
+        PathBuf::from(DEFAULT_OUT_DIR).join(sub)
+    }
+
+    /// Set only the DIR to the page-default. Keeps filename/ext as-is.
+    pub fn set_default_dir_for_page(&mut self, kind: PageKind) {
+        self.out_path.dir = Self::default_dir_for(kind);
+    }
+
+    /// Helper: compute a path string using a provided DIR and an arbitrary filename.
+    pub fn join_dir_and_filename<D: AsRef<Path>, F: AsRef<Path>>(dir: D, filename: F) -> PathBuf {
+        let mut p = dir.as_ref().to_path_buf();
+        p.push(filename.as_ref());
+        p
+    }
+
+    pub fn current_dir(&self) -> &Path {
+        &self.out_path.dir
+    }
+
+    pub fn is_current_dir_default_for(&self, kind: PageKind) -> bool {
+        fn norm(p: &Path) -> PathBuf { p.components().collect() }
+        norm(self.current_dir()) == norm(&Self::default_dir_for(kind))
+    }
+
+    pub fn is_fully_default_for(&self, kind: PageKind) -> bool {
+        if self.export_type != ExportType::SingleFile {
+            return false;
+        }
+        let dir_is_default = {
+            // Normalize both sides to components for platform separators
+            let def = Self::default_dir_for(kind);
+            def.components().eq(self.out_path.dir.components())
+        };
+        let stem_is_default = self.out_path.file_stem == OsString::from(DEFAULT_FILE);
+        let uses_default_ext = self.out_path.file_ext.is_none();
+
+        dir_is_default && stem_is_default && uses_default_ext
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputPath {
     dir: PathBuf,
-    file_stem: OsString, // without extension
+    file_stem: OsString,            // without extension
+    file_ext: Option<OsString>,     // user-chosen extension (e.g., "txt"); if None, use format.ext()
 }
 
 impl Default for OutputPath {
@@ -261,6 +317,7 @@ impl Default for OutputPath {
         Self {
             dir: PathBuf::from(DEFAULT_OUT_DIR).join(DEFAULT_PLAYERS_SUBDIR),
             file_stem: OsString::from(DEFAULT_FILE),
+            file_ext: None, // no extension chosen yet → format decides
         }
     }
 }

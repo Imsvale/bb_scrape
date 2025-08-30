@@ -1,4 +1,20 @@
 // src/teams.rs
+//! Teams data *facade* (cache-aware).
+//!
+//! Purpose:
+//! - Provide callers (GUI, other modules) with `Vec<(u32, String)>` of `(team_id, team_name)`.
+//! - **Load from cache** if present (`store::load_dataset(PageKind::Teams)`).
+//! - Otherwise **scrape & cache** by calling `scrape::collect_teams(None)` and persisting the returned dataset.
+//!
+//! Responsibilities:
+//! - Cache read/write (`store::load_dataset` / `store::save_dataset`).
+//! - Convert the raw `DataSet` rows into `(u32, String)` pairs (`dataset_to_pairs`).
+//!
+//! Non-Responsibilities (by design):
+//! - **No HTML parsing** (that lives in `src/specs/teams.rs`).
+//! - **No network fetching** (delegated through `scrape::collect_teams`).
+//!
+//! TL;DR: `teams.rs` decides *when* to scrape vs. reuse cached data and exposes a simple, ready-to-use list.
 use std::error::Error;
 use crate::config::options::PageKind::Teams;
 use crate::{scrape, store, store::DataSet};

@@ -1,16 +1,33 @@
 // src/file.rs
+//
+// Streaming export helpers so UI doesn't need to clone Vec<Vec<String>>.
+// Matches SingleFile behavior (delimiter + CSV quoting).
+//
+// We keep this generic: given canonical headers & rows, and a set of row
+// indices to write, we stream directly to a file. A tiny ColumnProjection
+// handles the "drop last column" case used by Game Results when match id
+// is hidden.
+//
+// Existing functions like `to_export_string` / `write_export_single` can
+// stay as-is. This adds a sibling streaming path for per-team.
 
 use std::{
     error::Error,
-    fs,
-    io::{self, Write},
+    fs::{self, File},
+    io::{self, Write, BufWriter},
     mem::take,
     path::{Path, PathBuf},
     collections::HashMap,
 };
 
-use crate::config::options::{ AppOptions, PageKind::Players };
+use crate::config::options::{ AppOptions, ExportOptions, PageKind::Players };
 use crate::core::sanitize;
+
+#[derive(Clone, Copy, Debug)]
+pub enum ColumnProjection {
+    KeepAll,
+    DropLast, // used by Game Results when match id is hidden
+}
 
 /* ---------- parsing (for .store) ---------- */
 
@@ -154,6 +171,41 @@ pub fn to_export_string(
     String::from_utf8(buf).unwrap_or_default()
 }
 
+pub fn stream_write_table_to_path(
+    path: &Path,
+    headers: &Option<Vec<String>>,
+    raw_rows: &Vec<Vec<String>>,
+    row_ix: &[usize],
+    delim: Option<char>,
+    proj: ColumnProjection,
+) -> io::Result<PathBuf> {
+    let d = delim.unwrap_or(',');
+    let mut w = BufWriter::new(File::create(path)?);
+
+    // Headers (borrowed, streamed)
+    if let Some(hs) = headers.as_ref() {
+        let take = match proj {
+            ColumnProjection::KeepAll => hs.len(),
+            ColumnProjection::DropLast => hs.len().saturating_sub(1),
+        };
+        write_line_iter(&mut w, hs.iter().take(take).map(|s| s.as_str()), d)?;
+    }
+
+    // Rows (borrowed, streamed)
+    for &ix in row_ix {
+        if let Some(row) = raw_rows.get(ix) {
+            let take = match proj {
+                ColumnProjection::KeepAll => row.len(),
+                ColumnProjection::DropLast => row.len().saturating_sub(1),
+            };
+            write_line_iter(&mut w, row.iter().take(take).map(|s| s.as_str()), d)?;
+        }
+    }
+
+    w.flush()?;
+    Ok(path.to_path_buf())
+}
+
 /* ---------- high-level writers ---------- */
 
 /// Write a single export file based on ExportOptions (path, headers policy, delimiter, etc.).
@@ -258,4 +310,115 @@ pub fn resolve_team_filename(
 
     *count += 1;
     dir.join(filename)
+}
+
+pub fn to_export_string_iter<'a, H, R, C>(
+    options: &ExportOptions,
+    headers: Option<H>,
+    rows: R,
+) -> String
+where
+    H: IntoIterator<Item = &'a str>,
+    R: IntoIterator<Item = C>,
+    C: IntoIterator<Item = &'a str>,
+{
+    let mut out = String::new();
+    let delim = options.delimiter().unwrap_or(',');
+    if let Some(hs) = headers {
+        write_line_into(&mut out, hs, delim);
+    }
+    for row in rows {
+        write_line_into(&mut out, row, delim);
+    }
+    out
+}
+
+pub fn write_export_single_iter<'a, H, R, C>(
+    options: &ExportOptions,
+    headers: Option<H>,
+    rows: R,
+) -> io::Result<PathBuf>
+where
+    H: IntoIterator<Item = &'a str>,
+    R: IntoIterator<Item = C>,
+    C: IntoIterator<Item = &'a str>,
+{
+    let path = options.out_path();
+    let f = File::create(&path)?;
+    let mut w = BufWriter::new(f);
+    let delim = options.delimiter().unwrap_or(',');
+
+    if let Some(hs) = headers {
+        write_line(&mut w, hs, delim)?;
+    }
+    for row in rows {
+        write_line(&mut w, row, delim)?;
+    }
+    w.flush()?;
+    Ok(path)
+}
+
+/* ---------- tiny CSV/TSV helpers (match your existing rules) ---------- */
+
+fn write_line_iter<W, S, I>(w: &mut W, cells: I, delim: char) -> io::Result<()>
+where
+    W: Write,
+    S: AsRef<str>,
+    I: IntoIterator<Item = S>,
+{
+    let mut first = true;
+    for cell in cells {
+        if !first { write!(w, "{delim}")?; } else { first = false; }
+        write_cell(w, cell.as_ref(), delim)?;
+    }
+    writeln!(w)?;
+    Ok(())
+}
+
+fn write_cell<W: Write>(w: &mut W, cell: &str, delim: char) -> io::Result<()> {
+    if needs_quotes(cell, delim) {
+        write!(w, "\"")?;
+        // RFC4180-style: double quotes inside quoted field
+        for ch in cell.chars() {
+            if ch == '"' { write!(w, "\"\"")?; } else { write!(w, "{ch}")?; }
+        }
+        write!(w, "\"")?;
+        Ok(())
+    } else {
+        w.write_all(cell.as_bytes())
+    }
+}
+
+// Helpers – do your existing CSV/TSV quoting here
+fn write_line_into<'a, I>(buf: &mut String, cells: I, delim: char)
+    where I: IntoIterator<Item = &'a str> 
+{
+    let mut first = true;
+    for cell in cells {
+        if !first { buf.push(delim); } else { first = false; }
+        push_escaped(buf, cell, delim);
+    }
+    buf.push('\n');
+}
+
+fn write_line<'a, I, W: Write>(w: &mut W, cells: I, delim: char) -> io::Result<()>
+    where I: IntoIterator<Item = &'a str> 
+{
+    let mut first = true;
+    for cell in cells {
+        if !first { write!(w, "{delim}")?; } else { first = false; }
+        write_escaped(w, cell, delim)?;
+    }
+    writeln!(w)?;
+    Ok(())
+}
+
+fn push_escaped(buf: &mut String, cell: &str, _delim: char) {
+    // Mirror your existing rules (quotes, newlines, etc.)
+    buf.push_str(cell);
+}
+
+fn write_escaped<W: Write>(w: &mut W, cell: &str, _delim: char) -> io::Result<()> {
+    // Mirror your existing rules
+    w.write_all(cell.as_bytes())
 }

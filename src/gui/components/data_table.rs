@@ -17,7 +17,12 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
 
     let cols = app.headers.as_ref()
         .map(|h| h.len())
-        .or_else(|| app.rows.get(0).map(|r| r.len()))
+        .or_else(|| {
+            let kind = app.current_page_kind();
+            app.raw_data.get(&kind)
+                .and_then(|raw| raw.dataset().rows.get(0))
+                .map(|r| r.len())
+        })
         .unwrap_or_else(|| page.default_headers().map(|h| h.len()).unwrap_or(0));
 
     let widths = page.preferred_column_widths();
@@ -44,12 +49,12 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
     table
         .header(24.0, |mut header| {
             if let Some(hs) = app.headers.as_ref() {
-                for h in hs.iter() {
+                for h in hs {
                     header.col(|ui| {
                         ui.scope(|ui| {
                             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                ui.label(RichText::new(h.as_str()).strong());
+                                ui.label(RichText::new(h).strong());
                             });
                         });
                     });
@@ -68,24 +73,24 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
             }
         })
         .body(|body| {
-            body.rows(20.0, app.rows.len(), |mut row| {
+            let kind = app.current_page_kind();
+            let raw_opt = app.raw_data.get(&kind).map(|r| r.dataset());
+            body.rows(20.0, app.row_ix.len(), |mut row| {
                 let row_idx = row.index();
-                if let Some(data) = app.rows.get(row_idx) {
-                    for (ci, cell) in data.iter().enumerate() {
-                        row.col(|ui| {
-                            ui.scope(|ui| {
-                                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                                let rt = RichText::new(cell);
-                                if ci == 0 {
-                                    ui.label(rt);
-                                } else {
-                                    ui.with_layout(
-                                        Layout::left_to_right(Align::Center),
-                                        |ui| { ui.label(rt) },
-                                    );
-                                }
+                if let (Some(raw), Some(&src_ix)) = (raw_opt, app.row_ix.get(row_idx)) {
+                    if let Some(data) = raw.rows.get(src_ix) {
+                        for (ci, cell) in data.iter().enumerate() {
+                            row.col(|ui| {
+                                ui.scope(|ui| {
+                                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                                    let rt = RichText::new(cell);
+                                    if ci == 0 { ui.label(rt); }
+                                    else {
+                                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| { ui.label(rt); });
+                                    }
+                                });
                             });
-                        });
+                        }
                     }
                 }
             });

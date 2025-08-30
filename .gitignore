@@ -1,6 +1,7 @@
 # Rust
 /target/
 /Cargo.lock
+/.cargo/
 
 # VSCode / IDE
 .vscode/
@@ -11,13 +12,10 @@
 Thumbs.db
 
 # App artifacts
-.cargo/config.toml
+
 /out/
 /.store/
-gfx/
-*.exe
-*.zip
+/.ignore/
 /SHA256SUMS.txt
 src/gui/config.rs
 src/gui/gui_old.rs
-src/gui/table_model.rs

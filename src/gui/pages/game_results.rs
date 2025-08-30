@@ -133,6 +133,29 @@ impl Page for GameResultsPage {
         }
     }
 
+    fn filter_row_indices_for_selection(
+        &self,
+        selected_ids: &[u32],
+        teams: &[(u32, String)],
+        rows: &Vec<Vec<String>>,
+    ) -> Option<Vec<usize>> {
+        let sel: HashSet<&str> = selected_ids.iter()
+            .filter_map(|id| teams.iter().find(|(tid, _)| tid == id))
+            .map(|(_, name)| name.as_str())
+            .collect();
+
+        // Cols: 2 Home team, 5 Away team
+        let ix = rows.iter().enumerate()
+            .filter(|(_, r)| {
+                r.get(2).map(|s| sel.contains(s.as_str())).unwrap_or(false) ||
+                r.get(5).map(|s| sel.contains(s.as_str())).unwrap_or(false)
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        Some(ix)
+    }
+
     fn filter_rows_for_selection(
         &self,
         selected_ids: &[u32],
@@ -191,5 +214,4 @@ impl Page for GameResultsPage {
         let rows_ok = ds.rows.iter().all(|r| r.len() == 7);
         hdr_ok && rows_ok
     }
-
 }

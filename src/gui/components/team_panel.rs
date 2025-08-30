@@ -5,43 +5,25 @@
 
 use eframe::egui;
 use crate::gui::app::App;
-use crate::data::FilteredData;
 
 pub fn draw(ui: &mut egui::Ui, app: &mut App) {
     ui.heading("Teams");
 
-    // Small helper to rebuild the current page's display after selection changes.
-    let refresh_current_display = |app: &mut App| {
-        let page = app.current_page();
-        let kind = app.current_page_kind();
-
-        if let Some(raw) = app.raw_data.get(&kind) {
-            let fd = FilteredData::from_raw(
-                page,
-                raw,
-                &app.state.gui.selected_team_ids,
-                &app.teams,
-            );
-            app.headers = fd.headers_owned();
-            app.rows = fd.to_owned_rows();
-        } else {
-            app.headers = page
-                .default_headers()
-                .map(|hs| hs.iter().map(|s| s!(*s)).collect());
-            app.rows = Vec::new();
-        }
-
+    // Apply current selection → scrape options, rebuild table, set status.
+    let apply_selection_change = |app: &mut App| {
+        app.sync_gui_selection_into_scrape();
+        app.rebuild_view();
         app.set_selection_message();
     };
 
     ui.horizontal(|ui| {
         if ui.button("All").clicked() {
             app.state.gui.selected_team_ids = app.teams.iter().map(|(id, _)| *id).collect();
-            refresh_current_display(app);
+            apply_selection_change(app);
         }
         if ui.button("None").clicked() {
             app.state.gui.selected_team_ids.clear();
-            refresh_current_display(app);
+            apply_selection_change(app);
         }
     });
 
@@ -77,7 +59,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
         }
 
         if changed {
-            refresh_current_display(app);
+            apply_selection_change(app);
             logf!(
                 "UI: Selection changed ({} teams) — {:?}",
                 app.state.gui.selected_team_ids.len(),

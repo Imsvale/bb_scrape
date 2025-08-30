@@ -70,4 +70,58 @@ impl Page for PlayersPage {
         // Append the freshly scraped rows.
         into.rows.extend(new.rows.into_iter());
     }
+
+    fn filter_row_indices_for_selection(
+        &self,
+        selected_ids: &[u32],
+        teams: &[(u32, String)],
+        rows: &Vec<Vec<String>>,
+    ) -> Option<Vec<usize>> {
+        const TEAM_COL: usize = 3;
+
+        let selected_names: HashSet<&str> = selected_ids.iter()
+            .filter_map(|id| teams.iter().find(|(tid, _)| tid == id))
+            .map(|(_, n)| n.as_str())
+            .collect();
+
+        let ix = rows.iter().enumerate()
+            .filter(|(_, r)| r.get(TEAM_COL)
+                .map(|t| selected_names.contains(t.as_str()))
+                .unwrap_or(false))
+            .map(|(i, _)| i)
+            .collect();
+
+        Some(ix)
+    }
+
+    fn filter_rows_for_selection(
+        &self,
+        selected_ids: &[u32],
+        teams: &[(u32, String)],
+        rows: &Vec<Vec<String>>,
+    ) -> Vec<Vec<String>> {
+
+        if selected_ids.len() == teams.len() {
+            return rows.clone();
+        }
+
+        if selected_ids.is_empty() {
+            return Vec::new();
+        }
+
+        const TEAM_COL: usize = 3;
+
+        use std::collections::HashSet;
+        let selected_names: HashSet<&str> = selected_ids.iter()
+            .filter_map(|id| teams.iter().find(|(tid, _)| tid == id))
+            .map(|(_, name)| name.as_str())
+            .collect();
+
+        rows.iter()
+            .filter(|r| r.get(TEAM_COL)
+                .map(|t| selected_names.contains(t.as_str()))
+                .unwrap_or(false))
+            .cloned()
+            .collect()
+    }
 }

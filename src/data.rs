@@ -4,14 +4,13 @@
 //
 // - RawData: read-only holder for canonical page data (cache + post-scrape).
 //            Only SCRAPE is allowed to mutate it, via an explicit method.
-// - FilteredData: derived (view) data produced from RawData by applying
+// - SelectionView: derived (view) data produced from RawData by applying
 //                 page-specific selection filtering for on-screen display.
 //
 // Common utilities that make sense at the dataset level live as methods
 // on DataSet itself (see src/store.rs).
 
-use std::borrow::Cow;
-use std::io::Result;
+use std::io;
 use std::path::PathBuf;
 
 use crate::store::DataSet;
@@ -34,7 +33,7 @@ impl RawData {
     /// Read-only view of the dataset.
     pub fn dataset(&self) -> &DataSet { &self.ds }
 
-    pub fn save(&self) -> Result<PathBuf> {
+    pub fn save(&self) -> io::Result<PathBuf> {
         crate::store::save_dataset(&self.kind, &self.ds)
     }
 
@@ -51,25 +50,57 @@ impl RawData {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Selection<'a> {
     pub ids: &'a [u32],
     pub teams: &'a [(u32, String)],
 }
 
+impl<'a> Selection<'a> {
+    #[inline] pub fn is_none(&self) -> bool { self.ids.is_empty() }
+    #[inline] pub fn is_all(&self) -> bool { self.ids.len() == self.teams.len() }
+
+    pub fn to_key_mask(&self) -> u32 {
+
+        // Guard against teams space exceeding bitmask space
+        debug_assert!(self.teams.len() <= 32);
+        debug_assert!(self.ids.iter().all(|&id| id < 32));
+        // If #teams ever exceeds 32, change to u64
+
+        let mut mask = 0u32;
+        for &id in self.ids {
+            // If ids ever drift >31, this just ignores the overflow safely
+            if id < 32 { mask |= 1u32 << id; }
+        }
+        mask
+    }
+
+    // If #teams ever exceeds 64:
+    // pub fn to_key(&self, teams_version: u64) -> SelectionKey {
+    //     use std::hash::{Hash, Hasher};
+    //     use std::collections::hash_map::DefaultHasher;
+
+    //     let mut ids = self.ids.to_vec();
+    //     ids.sort_unstable();
+    //     ids.dedup();
+
+    //     let mut h = DefaultHasher::new();
+    //     ids.hash(&mut h);
+    //     SelectionKey { ids_hash: h.finish(), teams_version }
+    // }
+}
+
 /// Zero-copy filtered view for display.
-/// Holds borrowed headers and a list of row indexes into RawData.
+/// Holds list of row indexes into RawData.
 #[derive(Clone, Debug)]
-pub struct FilteredData<'a> {
-    /// Borrowed headers (Cow: either borrowed from raw or owned defaults)
-    pub headers: Option<Cow<'a, [String]>>,
+pub struct SelectionView<'a> {
     /// Positions of kept rows in the raw dataset
     pub row_ix: Vec<usize>,
     /// Borrowed pointer to the canonical dataset
     raw: &'a DataSet,
 }
 
-impl<'a> FilteredData<'a> {
+impl<'a> SelectionView<'a> {
     /// Build a filtered view from RawData and a page's selection filter.
     /// NOTE: Since the Page trait exposes only a row-vector filter and not
     /// a per-row predicate, we compute indices by comparing filtered rows
@@ -79,42 +110,35 @@ impl<'a> FilteredData<'a> {
     pub fn from_raw(
         page: &dyn Page,
         raw: &'a RawData,
-        selected_team_ids: &[u32],
-        teams: &[(u32, String)],
+        sel: Selection<'_>
     ) -> Self {
         let ds = raw.dataset();
 
-        // Borrow headers if present; otherwise use page defaults (owned).
-        let headers = match &ds.headers {
-            Some(h) => Some(Cow::Borrowed(h.as_slice())),
-            None => page
-                .default_headers()
-                .map(|hs| Cow::Owned(hs.iter().map(|s| s.to_string()).collect::<Vec<_>>())),
-        };
+        if sel.is_none() { return Self { row_ix: vec![], raw: ds }; }
+        if sel.is_all()  { return Self { row_ix: (0..ds.rows.len()).collect(), raw: ds }; }
 
-        // Use existing page API to get owned filtered rows, then map to indices.
-        let filtered_rows = page.filter_rows_for_selection(selected_team_ids, teams, &ds.rows);
-
-        let mut row_ix = Vec::with_capacity(filtered_rows.len());
-        if filtered_rows.len() == ds.rows.len() {
-            // Fast path: keep all
-            row_ix.extend(0..ds.rows.len());
-        } else {
-            // Map filtered rows back to first unused matching raw row index.
-            let mut used = vec![false; ds.rows.len()];
-            'outer: for fr in &filtered_rows {
-                for (i, rr) in ds.rows.iter().enumerate() {
-                    if !used[i] && rr == fr {
-                        used[i] = true;
-                        row_ix.push(i);
-                        continue 'outer;
-                    }
-                }
-                // If no match, skip silently (defensive)
-            }
+        // Fast path: ask the page for row indices directly
+        if let Some(ix) = page.filter_row_indices_for_selection(sel.ids, sel.teams, &ds.rows) {
+            return Self { row_ix: ix, raw: ds };
         }
 
-        Self { headers, row_ix, raw: ds }
+        // Fallback: Get owned rows, then remap to indices: O(n²)
+        let filtered_rows = page.filter_rows_for_selection(sel.ids, sel.teams, &ds.rows);
+
+        let mut row_ix = Vec::with_capacity(filtered_rows.len());
+        let mut used = vec![false; ds.rows.len()];
+        'outer: for fr in &filtered_rows {
+            for (i, rr) in ds.rows.iter().enumerate() {
+                if !used[i] && rr == fr {
+                    used[i] = true;
+                    row_ix.push(i);
+                    continue 'outer;
+                }
+            }
+            // If no match, skip silently (defensive)
+        }
+
+        Self { row_ix, raw: ds }
     }
 
     /// Number of rows in the projection.
@@ -126,13 +150,13 @@ impl<'a> FilteredData<'a> {
         self.row_ix.get(i).and_then(|&ix| self.raw.rows.get(ix).map(|r| r.as_slice()))
     }
 
-    /// Materialize owned headers (for UI/export boundaries).
-    pub fn headers_owned(&self) -> Option<Vec<String>> {
-        self.headers.as_ref().map(|c| c.to_vec())
-    }
-
     /// Materialize owned rows (for UI/export boundaries).
     pub fn to_owned_rows(&self) -> Vec<Vec<String>> {
         self.row_ix.iter().map(|&ix| self.raw.rows[ix].clone()).collect()
+    }
+
+    /// Build a view directly from precomputed indices (cache hit path).
+    pub fn from_indices(raw: &'a RawData, row_ix: Vec<usize>) -> Self {
+        Self { row_ix, raw: raw.dataset() }
     }
 }
