@@ -7,7 +7,8 @@ USAGE
   ./cli --list-teams              Print all team ids/names and exit
 
 PAGES
-  -p, --page players              Which page to scrape (default: players)
+  -p, --page <name>               Which page to scrape (default: players)
+                                  Allowed: players | game-results | teams
 
 TEAM SELECTION (0–31)
   -t, --team <id>                 Add a team id (repeatable)
@@ -18,8 +19,9 @@ TEAM SELECTION (0–31)
 EXPORT
   -f, --format [csv|tsv]          Output format (default: csv)
   -x, --drop-headers              Drop the header row
-  -#, --nohash                    Remove the '#' from player numbers
+  -s, --skip-optional             Page-agnostic: Players → remove '#'; Results → drop match id
   -m, --multi, --per-team         Each team in a separate file, named <Team_Name>.extension
+                                  Supported for Players and Game Results.
   -o, --out <path>                Single-file: file name, or directory (with default file name)
                                   Per-team:   directory
                                   Anything with a trailing slash (…/ or …\) is treated as a directory.
