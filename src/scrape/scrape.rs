@@ -142,7 +142,7 @@ pub fn collect_players(
     Ok(DataSet { headers, rows })
 }
 
-pub fn collect_game_results(mut progress: Option<&mut dyn Progress>,) -> Result<DataSet, Box<dyn Error>> {
+pub fn collect_game_results(_progress: Option<&mut dyn Progress>,) -> Result<DataSet, Box<dyn Error>> {
     let bundle = scrape::game_results::fetch()?;
     Ok(DataSet { headers: bundle.headers, rows: bundle.rows })
 }

@@ -30,14 +30,30 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let mut app_state = AppState::default();
     parse_cli(&mut app_state)?;
     
-    let scrape = &app_state.options.scrape;
-    let options = &app_state.options;
+    let page = app_state.options.scrape.page;
+    let options = &mut app_state.options;
+
+    // Ensure default DIR mirrors page (preserve filename/ext if user didn't change DIR)
+    // Only flip when current dir is one of the page defaults.
+    if options.export.is_current_dir_default_for(PageKind::Players)
+        || options.export.is_current_dir_default_for(PageKind::GameResults)
+        || options.export.is_current_dir_default_for(PageKind::Teams)
+    {
+        options.export.set_default_dir_for_page(page);
+    }
+    // Special-case Teams: default filename should be "teams" instead of "all"
+    if matches!(page, PageKind::Teams)
+        && options.export.is_fully_default_for(PageKind::Teams)
+    {
+        // Only change the stem when still fully-default
+        options.export.set_path(crate::config::consts::DEFAULT_TEAMS_FILE);
+    }
 
     // 1) SCRAPE
     let mut cp = CliProgress::default();
 
-    let ds = match scrape.page {
-        Players => scrape::collect_players(scrape, Some(&mut cp))?,
+    let mut ds = match page {
+        Players => scrape::collect_players(&options.scrape, Some(&mut cp))?,
         Teams => scrape::collect_teams(Some(&mut cp))?,
         GameResults => scrape::collect_game_results(Some(&mut cp))?,
         SeasonStats => todo!("CLI: SeasonStats scraper not implemented yet"),
@@ -45,36 +61,53 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         Injuries => todo!("CLI: Injuries scraper not implemented yet"),
     };
 
+    // Align with GUI: if headers are missing, inject page defaults so exports include headers.
+    inject_headers_for_cli(page, &mut ds);
+
     // 2) Cache the dataset (best-effort)
-    let _ = store::save_dataset(&scrape.page, &DataSet {
+    let _ = store::save_dataset(&page, &DataSet {
         headers: ds.headers.clone(),
         rows: ds.rows.clone(),
     });
 
     // 3) Export according to ExportOptions
-    let export = &app_state.options.export;
+    let export = &mut options.export;
+
+    // Page-agnostic skip optional: players=#, results=match id
+    if export.skip_optional {
+        if matches!(page, PageKind::Players) {
+            export.keep_hash = false;
+        }
+    }
 
     // Per-team only makes sense for pages that can be split into team-wise data
     // For now just Players
     // Later also Career and Season stats, maybe even Game Results and Injuries
     // So potentially all except the Teams list
-    let (effective_export_type, team_col) = match scrape.page {
+    let (effective_export_type, team_col) = match page {
         Players => (export.export_type, Some(3usize)),
-        _ if matches!(export.export_type, PerTeam) => {
-            eprintln!("Per-team export is only supported for the Players page; writing a single file instead.");
-            (SingleFile, None)
-        }
+        GameResults => (export.export_type, None), // use two-column variant
         _ => (export.export_type, None),
     };
 
+    // Adjust headers/rows for Game Results when skipping optional match id
+    let (mut headers_to_write, mut rows_to_write) = (ds.headers.clone(), ds.rows.clone());
+    if matches!(page, PageKind::GameResults) && export.skip_optional {
+        if let Some(h) = &mut headers_to_write { if !h.is_empty() { h.pop(); } }
+        for r in &mut rows_to_write { if !r.is_empty() { r.pop(); } }
+    }
+
     let written: Vec<PathBuf> = match effective_export_type {
         SingleFile => {
-            file::write_export_single(options, &ds.headers, &ds.rows)
+            file::write_export_single(options, &headers_to_write, &rows_to_write)
                 .map(|p| vec![p])?
         }
         PerTeam => {
-            // safe: only reached for Players due to guard above
-            file::write_export_per_team(options, &ds.headers, &ds.rows, team_col.unwrap())?
+            match page {
+                PageKind::Players => file::write_export_per_team(options, &headers_to_write, &rows_to_write, team_col.unwrap())?,
+                PageKind::GameResults => file::write_export_per_team_results(options, &headers_to_write, &rows_to_write, 2, 5)?,
+                _ => file::write_export_per_team(options, &headers_to_write, &rows_to_write, team_col.unwrap_or(0))?,
+            }
         }
     };
 
@@ -138,7 +171,7 @@ fn parse_cli(app_state: &mut AppState) -> Result<(), Box<dyn Error>> {
                 export.format = ExportFormat::from_str(&v)?;
             }
 
-            "-#" | "--nohash" => { export.keep_hash = false; }
+            "-s" | "--skip-optional" => { export.skip_optional = true; }
             "-x" | "--drop-headers" => { export.include_headers = false; }
             "-m" | "--multi" | "--per-team" => { export.export_type = PerTeam; }
 
@@ -174,12 +207,71 @@ fn parse_ids_list(s: &str) -> Result<Vec<u32>, Box<dyn Error>> {
     Ok(out)
 }
 
+/// Fill headers from page defaults when the scraper returns None, mirroring the GUI behavior.
+fn inject_headers_for_cli(kind: PageKind, ds: &mut DataSet) {
+    if ds.headers.is_some() { return; }
+    let page = crate::gui::router::page_for(&kind);
+    if let Some(hs) = page.default_headers() {
+        ds.headers = Some(hs.iter().map(|s| s.to_string()).collect());
+    }
+}
+
 /* ---------- CLI progress ---------- */
 
 #[derive(Default)]
 struct CliProgress {
     done: usize,
     total: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::options::ExportType;
+
+    #[test]
+    fn ids_parser_handles_ranges_and_values() {
+        let v = parse_ids_list("1, 3-5, 7").unwrap();
+        assert_eq!(v, vec![1,3,4,5,7]);
+
+        // out-of-range values are ignored (>=32)
+        let v2 = parse_ids_list("0, 31, 32, 40").unwrap();
+        assert_eq!(v2, vec![0,31]);
+
+        // duplicates are removed and sorted
+        let v3 = parse_ids_list("5, 3-5, 4").unwrap();
+        assert_eq!(v3, vec![3,4,5]);
+    }
+
+    // Keep the export gating logic equivalent to run() for testability.
+    fn effective_export_for(page: PageKind, requested: ExportType) -> (ExportType, Option<usize>) {
+        match page {
+            Players => (requested, Some(3usize)),
+            _ if matches!(requested, PerTeam) => (SingleFile, None),
+            _ => (requested, None),
+        }
+    }
+
+    #[test]
+    fn per_team_only_for_players() {
+        // Players keeps per-team and returns team_col=3
+        let (ty, col) = effective_export_for(PageKind::Players, PerTeam);
+        assert!(matches!(ty, PerTeam));
+        assert_eq!(col, Some(3));
+
+        // Non-Players downgrades to SingleFile
+        let (ty2, col2) = effective_export_for(PageKind::GameResults, PerTeam);
+        assert!(matches!(ty2, SingleFile));
+        assert_eq!(col2, None);
+    }
+
+    #[test]
+    fn inject_headers_uses_page_defaults() {
+        let mut ds = DataSet { headers: None, rows: vec![vec!["x".into()]] };
+        inject_headers_for_cli(PageKind::GameResults, &mut ds);
+        assert!(ds.headers.is_some());
+        assert_eq!(ds.headers.as_ref().unwrap().get(0).map(|s| s.as_str()), Some("S"));
+    }
 }
 
 impl Progress for CliProgress {

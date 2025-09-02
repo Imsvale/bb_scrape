@@ -8,7 +8,7 @@ A fast site scraper for Brutalball.
 
 ### Quick start (Windows)
 
-* **Download** the latest release, e.g. `bb_scrape_v1.1.0_windows_x86_64.zip`.
+* **Download** the latest release, e.g. `bb_scrape_v1.2.0_windows_x86_64.zip`.
 * **Extract** it to a suitable folder.
 * **Run** `bb_scrape.exe` for the GUI.
 * Click **SCRAPE**.
@@ -25,21 +25,26 @@ Tip: The left panel lets you pick which teams to scrape.
 * Install Rust, then:
 * Build GUI: `cargo build --release`
 * Build CLI: `cargo build --release --bin cli --features=cli` (required)
+* Build both: `cargo build --release`
 
 ---
 
 ### Features
 
+* **Scrape** for **Players** and **Game results** (current season)
+  * Also **teams**, but that's more of an incidental side thing.
 * **Player data:** `Name, #00, Race, Team, TV, OVR, ..., Dur, Sal`
 * **Formats:** 
   * Comma-separated values `(CSV)`
   * Tab-separated values `(TSV)`
 * **Toggle headers**
-* **Toggle player number `#` sign**
+* **Page-specific optionals:**
+  * **Players:** Toggle player number `#` sign
+  * **Game results:** Toggle game ids column
 * **Copy to clipboard**
 * **Export to file**
-  * Single file (all players)
-  * Per team
+  * All-in-one file
+  * Separate file per team (where applicable)
 * **Select** which teams to scrape.
   * `All` / `None`
   * `Ctrl + click`: Select individual teams
@@ -84,14 +89,15 @@ Common flags:
 -l, --list-teams            Print id and name for all teams
 
 SCRAPE:
--p, --page players|teams    Which page to scrape (default: players)
+-p, --page <page>           Which page to scrape (default: players)
+                            Valid pages: players|game-results|teams
 -t, --team <id>             One team by id (0–31)
 -i, --ids <list>            Subset of ids, e.g. 0,2,5-7
 
 EXPORT:
--m, --multi, --per-team     Per-team files
+-m, --multi, --per-team     Per-team files (Players, Game Results)
 -x, --drop-headers          Do not write the header row
--#, --nohash                Strip '#' from player numbers (Players page only)
+-s, --skip-optional         Page-agnostic: Players → remove '#'; Results → drop match id
 -f, --format csv|tsv        Output format (default: csv)
 -o, --out <path>            Output file path (single) or directory (per-team)
 ```

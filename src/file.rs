@@ -20,7 +20,7 @@ use std::{
     collections::HashMap,
 };
 
-use crate::config::options::{ AppOptions, ExportOptions, PageKind::Players };
+use crate::config::options::{ AppOptions, ExportOptions, PageKind, PageKind::{Players, GameResults} };
 use crate::core::sanitize;
 
 #[derive(Clone, Copy, Debug)]
@@ -421,4 +421,88 @@ fn push_escaped(buf: &mut String, cell: &str, _delim: char) {
 fn write_escaped<W: Write>(w: &mut W, cell: &str, _delim: char) -> io::Result<()> {
     // Mirror your existing rules
     w.write_all(cell.as_bytes())
+}
+
+/// Write per-team files for pages that have two team columns (e.g., Game Results: home and away).
+/// Each row is written to both teams' files.
+pub fn write_export_per_team_results(
+    options: &AppOptions,
+    headers: &Option<Vec<String>>,
+    rows: &[Vec<String>],
+    home_col: usize,
+    away_col: usize,
+) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let export = &options.export;
+    let outdir = export.out_path();
+    ensure_directory(&outdir)?;
+
+    // Group rows by team name, considering both home and away columns
+    let mut by_team: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+    for r in rows {
+        if let Some(home) = r.get(home_col) {
+            by_team.entry(home.clone()).or_default().push(r.clone());
+        }
+        if let Some(away) = r.get(away_col) {
+            by_team.entry(away.clone()).or_default().push(r.clone());
+        }
+    }
+
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut written = Vec::with_capacity(by_team.len());
+    let ext = export.format.ext();
+
+    for (team_name, team_rows) in by_team {
+        let base_stem = sanitize::sanitize_team_filename(&team_name, 0);
+        let path = resolve_team_filename(&outdir, &base_stem, &mut seen, ext);
+
+        let contents = to_export_string(
+            options,
+            headers,
+            &team_rows,
+        );
+
+        fs::write(&path, contents)?;
+        written.push(path);
+    }
+
+    Ok(written)
+}
+
+/// Central export entry for both CLI and GUI tests without any network.
+/// Chooses the right writer based on page kind and ExportOptions.
+pub fn export_dataset(
+    options: &AppOptions,
+    kind: PageKind,
+    headers: &Option<Vec<String>>,
+    rows: &[Vec<String>],
+) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let export = &options.export;
+
+    // Adjust headers/rows for page-agnostic optional fields
+    let (mut hdrs, mut rws) = (headers.clone(), rows.to_vec());
+    if export.skip_optional && matches!(kind, GameResults) {
+        if let Some(h) = &mut hdrs { if !h.is_empty() { h.pop(); } }
+        for r in &mut rws { if !r.is_empty() { r.pop(); } }
+    }
+
+    // For Players, skip_optional maps to keep_hash = false
+    let mut local = options.clone();
+    if export.skip_optional && matches!(kind, Players) {
+        local.export.keep_hash = false;
+    }
+    let opts = &local;
+
+    match export.export_type {
+        crate::config::options::ExportType::SingleFile => {
+            let path = write_export_single(opts, &hdrs, &rws)?;
+            Ok(vec![path])
+        }
+        crate::config::options::ExportType::PerTeam => {
+            match kind {
+                Players => write_export_per_team(opts, &hdrs, &rws, 3),
+                GameResults => write_export_per_team_results(opts, &hdrs, &rws, 2, 5),
+                _ => write_export_per_team(opts, &hdrs, &rws, 0), // best-effort
+            }
+        }
+    }
 }

@@ -44,15 +44,36 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
             if resp.clicked() && !app.running {
                 let input = ui.input(|i| i.clone());
                 let sel = &mut app.state.gui.selected_team_ids;
+                let ctrl = input.modifiers.ctrl;
+                let shift = input.modifiers.shift;
 
-                if input.modifiers.ctrl {
+                if ctrl && shift {
+                    if let Some(last) = app.last_clicked {
+                        let (lo, hi) = if last <= idx { (last, idx) } else { (idx, last) };
+                        for j in lo..=hi {
+                            let tid = app.teams[j].0;
+                            if !sel.contains(&tid) { sel.push(tid); }
+                        }
+                        app.last_clicked = Some(idx);
+                    } else {
+                        // No anchor: fall back to ctrl-toggle on single item
+                        if is_selected { sel.retain(|x| x != id); } else { sel.push(*id); }
+                        app.last_clicked = Some(idx);
+                    }
+                } else if ctrl {
                     if is_selected { sel.retain(|x| x != id); } else { sel.push(*id); }
                     app.last_clicked = Some(idx);
-                } else if input.modifiers.shift {
+                } else if shift {
                     if let Some(last) = app.last_clicked {
                         let (lo, hi) = if last <= idx { (last, idx) } else { (idx, last) };
                         sel.clear();
                         for j in lo..=hi { sel.push(app.teams[j].0); }
+                        app.last_clicked = Some(idx);
+                    } else {
+                        // No anchor: behave like single click
+                        sel.clear();
+                        sel.push(*id);
+                        app.last_clicked = Some(idx);
                     }
                 } else {
                     sel.clear();

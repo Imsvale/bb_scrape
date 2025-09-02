@@ -184,6 +184,7 @@ pub struct ExportOptions {
     out_path: OutputPath,
     pub include_headers: bool, 
     pub keep_hash: bool,
+    pub skip_optional: bool,
 }
 
 impl Default for ExportOptions {
@@ -194,6 +195,7 @@ impl Default for ExportOptions {
             out_path: OutputPath::default(),
             include_headers: true,
             keep_hash: true,
+            skip_optional: false,
         }
     }
 }
@@ -263,6 +265,7 @@ impl ExportOptions {
         let sub = match kind {
             PageKind::Players     => DEFAULT_PLAYERS_SUBDIR,
             PageKind::GameResults => DEFAULT_RESULTS_SUBDIR,
+            PageKind::Teams       => DEFAULT_TEAMS_SUBDIR,
             _ => DEFAULT_PLAYERS_SUBDIR, // extend as needed
         };
         PathBuf::from(DEFAULT_OUT_DIR).join(sub)
