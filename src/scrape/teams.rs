@@ -65,10 +65,9 @@ fn scrape_from_league_table(doc: &str) -> Result<Vec<Vec<String>>, Box<dyn Error
     let n = bytes.len();
 
     // tiny helpers
-    let mut next_char_pos = |from: usize, ch: u8| -> Option<usize> {
+    let next_char_pos = |from: usize, ch: u8| -> Option<usize> {
         bytes.get(from..)?.iter().position(|&c| c == ch).map(|off| from + off)
     };
-    let lower_contains = |s: &str, needle: &str| s.to_ascii_lowercase().contains(needle);
 
     while i < n {
         // find next '<'

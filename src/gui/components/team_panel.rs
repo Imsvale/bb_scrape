@@ -13,7 +13,12 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
     let apply_selection_change = |app: &mut App| {
         app.sync_gui_selection_into_scrape();
         app.rebuild_view();
-        app.set_selection_message();
+
+        // Don't overwrite progress messages with team selection info
+        if !app.running {
+            app.set_selection_message();
+        }
+        
     };
 
     ui.horizontal(|ui| {

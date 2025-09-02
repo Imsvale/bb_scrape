@@ -83,11 +83,6 @@ impl DataSet {
             .position(|s| s.eq_ignore_ascii_case(name))
     }
 
-    pub fn ensure_rectangular(&self, n: usize) -> bool {
-        self.rows.iter().all(|r| r.len() == n)
-            && self.headers.as_ref().map(|h| h.len() == n).unwrap_or(true)
-    }
-
     pub fn indexes_filtered_by_selection(
         &self,
         page: &dyn Page,
@@ -106,16 +101,6 @@ impl DataSet {
             }
         }
         ix
-    }
-
-    pub fn project_columns(&self, keep: &[usize]) -> DataSet {
-        let headers = self.headers.as_ref().map(|h| {
-            keep.iter().filter_map(|&i| h.get(i).cloned()).collect()
-        });
-        let rows = self.rows.iter().map(|r| {
-            keep.iter().filter_map(|&i| r.get(i).cloned()).collect()
-        }).collect();
-        DataSet { headers, rows }
     }
 
     /// Returns headers or the page's default/fallback headers if none present.

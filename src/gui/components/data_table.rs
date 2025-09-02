@@ -46,16 +46,31 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
         }
     }
 
+    // Determine numeric columns from the Page's static hints.
+    let kind = app.current_page_kind();
+    let raw_opt = app.raw_data.get(&kind).map(|r| r.dataset());
+
+    let non_numeric = page.non_numeric_columns();
+    let numeric_cols: Vec<bool> = (0..cols)
+        .map(|ci| !non_numeric.contains(&ci))
+        .collect();
+
     table
         .header(24.0, |mut header| {
             if let Some(hs) = app.headers.as_ref() {
-                for h in hs {
+                for (ci, h) in hs.iter().enumerate() {
                     header.col(|ui| {
                         ui.scope(|ui| {
                             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                ui.label(RichText::new(h).strong());
-                            });
+                            if numeric_cols.get(ci).copied().unwrap_or(false) {
+                                ui.centered_and_justified(|ui| {
+                                    ui.label(RichText::new(h).strong());
+                                });
+                            } else {
+                                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                    ui.label(RichText::new(h).strong());
+                                });
+                            }
                         });
                     });
                 }
@@ -64,17 +79,21 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
                     header.col(|ui| {
                         ui.scope(|ui| {
                             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                ui.label(RichText::new(format!("Col {}", i + 1)).strong());
-                            });
+                            if numeric_cols.get(i).copied().unwrap_or(false) {
+                                ui.centered_and_justified(|ui| {
+                                    ui.label(RichText::new(format!("Col {}", i + 1)).strong());
+                                });
+                            } else {
+                                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                    ui.label(RichText::new(format!("Col {}", i + 1)).strong());
+                                });
+                            }
                         });
                     });
                 }
             }
         })
         .body(|body| {
-            let kind = app.current_page_kind();
-            let raw_opt = app.raw_data.get(&kind).map(|r| r.dataset());
             body.rows(20.0, app.row_ix.len(), |mut row| {
                 let row_idx = row.index();
                 if let (Some(raw), Some(&src_ix)) = (raw_opt, app.row_ix.get(row_idx)) {
@@ -84,8 +103,9 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
                                 ui.scope(|ui| {
                                     ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                                     let rt = RichText::new(cell);
-                                    if ci == 0 { ui.label(rt); }
-                                    else {
+                                    if numeric_cols.get(ci).copied().unwrap_or(false) {
+                                        ui.centered_and_justified(|ui| { ui.label(rt); });
+                                    } else {
                                         ui.with_layout(Layout::left_to_right(Align::Center), |ui| { ui.label(rt); });
                                     }
                                 });

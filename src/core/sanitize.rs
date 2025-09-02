@@ -40,3 +40,16 @@ pub fn strip_brackets(s: &str) -> String {
     }
     out.trim().to_string()
 }
+
+/// Keep only letters and spaces up to the first non-letter.
+/// If the non-letter is preceded by a space, drop that trailing space too.
+pub fn letters_only_trim(s: &str) -> String {
+    let s = normalize_ws(s);
+    for (i, ch) in s.char_indices() {
+        if !(ch.is_alphabetic() || ch.is_whitespace()) {
+            let cut = s[..i].trim_end();
+            return cut.to_string();
+        }
+    }
+    s.trim().to_string()
+}

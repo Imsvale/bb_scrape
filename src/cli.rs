@@ -9,6 +9,7 @@ use crate::{
 };
 use crate::{
     store::{ self, DataSet },
+    progress::Progress,
     config::{
         state::AppState, 
         options::{ 
@@ -16,7 +17,7 @@ use crate::{
             ExportFormat, 
             PageKind::{ self, * }
         },
-    }
+    },
 };
 
 pub enum Mode {
@@ -33,12 +34,12 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let options = &app_state.options;
 
     // 1) SCRAPE
-    let mut progress = CliProgress::default();
+    let mut cp = CliProgress::default();
 
     let ds = match scrape.page {
-        Players => scrape::collect_players(scrape, Some(&mut progress))?,
-        Teams => scrape::collect_teams(Some(&mut progress))?,
-        GameResults => scrape::collect_game_results(Some(&mut progress))?,
+        Players => scrape::collect_players(scrape, Some(&mut cp))?,
+        Teams => scrape::collect_teams(Some(&mut cp))?,
+        GameResults => scrape::collect_game_results(Some(&mut cp))?,
         SeasonStats => todo!("CLI: SeasonStats scraper not implemented yet"),
         CareerStats => todo!("CLI: CareerStats scraper not implemented yet"),
         Injuries => todo!("CLI: Injuries scraper not implemented yet"),
@@ -181,7 +182,7 @@ struct CliProgress {
     total: usize,
 }
 
-impl crate::progress::Progress for CliProgress {
+impl Progress for CliProgress {
     fn begin(&mut self, total: usize) {
         self.total = total;
         eprintln!("Fetching… {} team(s)", total);

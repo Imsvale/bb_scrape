@@ -4,7 +4,7 @@ use std::error::Error;
 
 use crate::core::{net, html};
 use crate::core::html::{slice_between_ci, next_tag_block_ci, inner_after_open_tag, strip_tags};
-use crate::core::sanitize::{normalize_entities, normalize_ws};
+use crate::core::sanitize::{normalize_entities, normalize_ws, letters_only_trim};
 
 pub struct RosterBundle {
     pub headers: Option<Vec<String>>,
@@ -99,12 +99,112 @@ fn extract_team_name(table_inner: &str) -> Option<String> {
             let mut txt = inner_after_open_tag(td);
             txt = strip_tags(normalize_entities(&txt));
 
-            if let Some(i) = txt.find(" Team owner") { return Some(txt[..i].trim().to_string()); }
-            if let Some(i) = txt.find(" | ") { return Some(txt[..i].trim().to_string()); }
-            let t = txt.trim(); if !t.is_empty() { return Some(t.to_string()); }
+            // New site format appends season record in parentheses, e.g. "Team (6 - 0 - 2)".
+            // Strip known suffixes while extracting the clean team name.
+            if let Some(i) = txt.find(" Team owner") {
+                let name = strip_record_suffix(&txt[..i]);
+                return Some(letters_only_trim(name.trim()));
+            }
+            if let Some(i) = txt.find(" | ") {
+                let name = strip_record_suffix(&txt[..i]);
+                return Some(letters_only_trim(name.trim()));
+            }
+            let t = strip_record_suffix(txt.trim());
+            let t = letters_only_trim(&t);
+            if !t.is_empty() { return Some(t); }
         }
     }
     None
+}
+
+/// Remove a trailing parenthesized season record like "(6 - 0 - 2)".
+/// Conservative check: only if the parentheses content contains only digits,
+/// spaces and hyphens, with at least one hyphen and some digits.
+fn strip_record_suffix(s: &str) -> String {
+    let t = s.trim();
+    if t.ends_with(')') {
+        if let Some(open) = t.rfind('(') {
+            if open > 0 {
+                let inner = &t[open + 1..t.len() - 1];
+                let has_digit = inner.chars().any(|c| c.is_ascii_digit());
+                let hyphens = inner.chars().filter(|&c| c == '-').count();
+                let ok_chars = inner.chars().all(|c| c.is_ascii_digit() || c == '-' || c.is_ascii_whitespace());
+                if has_digit && hyphens >= 1 && ok_chars {
+                    return t[..open].trim().to_string();
+                }
+            }
+        }
+    }
+    t.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::sanitize::letters_only_trim;
+
+    #[test]
+    fn letters_only_trims_at_non_letter() {
+        assert_eq!(letters_only_trim("Failurewood Hills (6 - 0 - 2)"), "Failurewood Hills");
+        assert_eq!(letters_only_trim("Alpha Beta,"), "Alpha Beta");
+        assert_eq!(letters_only_trim("OnlyLetters"), "OnlyLetters");
+    }
+
+    #[test]
+    fn strip_record_suffix_variants() {
+        assert_eq!(strip_record_suffix("Team (6 - 0 - 2)"), "Team");
+        assert_eq!(strip_record_suffix("Team (Champions)"), "Team (Champions)");
+    }
+
+    #[test]
+    fn extract_team_name_handles_owner_and_pipe() {
+        let table = r#"
+            <tr><td><h5>Failurewood Hills (6 - 0 - 2) Team owner Foo</h5></td></tr>
+        "#;
+        assert_eq!(extract_team_name(table).as_deref(), Some("Failurewood Hills"));
+
+        let table2 = r#"
+            <tr><td><h5>My Team | Division Alpha</h5></td></tr>
+        "#;
+        assert_eq!(extract_team_name(table2).as_deref(), Some("My Team"));
+    }
+
+    #[test]
+    fn extract_team_name_trims_digits_and_punct() {
+        let table = r#"
+            <tr><td><h5>Team 2</h5></td></tr>
+        "#;
+        assert_eq!(extract_team_name(table).as_deref(), Some("Team"));
+
+        let table2 = r#"
+            <tr><td><h5>Team-Name</h5></td></tr>
+        "#;
+        assert_eq!(extract_team_name(table2).as_deref(), Some("Team"));
+    }
+
+    #[test]
+    fn split_first_cell_variants() {
+        assert_eq!(split_first_cell("Name #27 Race"), ("Name".into(), "#27".into(), "Race".into()));
+        assert_eq!(split_first_cell("Name #27"), ("Name".into(), "#27".into(), "".into()));
+        assert_eq!(split_first_cell("Name"), ("Name".into(), "".into(), "".into()));
+    }
+
+    #[test]
+    fn remove_bracket_tags_works() {
+        assert_eq!(remove_bracket_tags("[CAPTAIN] Name [out]"), "Name");
+    }
+
+    #[test]
+    fn read_site_headers_row_consecutive_th() {
+        let html = r#"
+            <table>
+              <th>A</th><th>B</th>  <td>stop</td>
+            </table>
+        "#;
+        let inner = html; // function scans whole string for <th> blocks
+        let hdrs = read_site_headers_row(inner);
+        assert_eq!(hdrs, vec!["A", "B"]);
+    }
 }
 
 /// Read consecutive <th>…</th> header cells. Works even if not wrapped in <tr>.

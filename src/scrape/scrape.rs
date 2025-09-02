@@ -10,10 +10,10 @@ use crate::{
 
     progress::Progress, 
     store::{ self, DataSet },
-
-    specs, 
-    teams, 
+    get_teams, 
 };
+
+use super::*;
 
 fn resolve_ids(sel: &TeamSelector) -> Vec<u32> {
     match sel {
@@ -24,7 +24,7 @@ fn resolve_ids(sel: &TeamSelector) -> Vec<u32> {
 }
 
 pub fn list_teams() -> Vec<(u32, String)> {
-    match teams::load() {
+    match get_teams::load() {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Warning: could not load team list: {}", e);
@@ -37,14 +37,9 @@ pub fn collect_teams(mut progress: Option<&mut dyn Progress>)
     -> Result<DataSet, Box<dyn Error>>
 {
     if let Some(p) = progress.as_deref_mut() {
-        p.begin(1);
-        p.log("Fetching teams...");
+        p.log("Refreshing teams…");
     }
-    let bundle = specs::teams::fetch()?;
-    if let Some(p) = progress.as_deref_mut() {
-        p.item_done(999_999); // or add a non-team sentinel in the trait later
-        p.finish();
-    }
+    let bundle = teams::fetch()?;
     Ok(DataSet { headers: bundle.headers, rows: bundle.rows })
 }
 
@@ -55,7 +50,7 @@ pub fn collect_players(
     mut progress: Option<&mut dyn Progress>,
 ) -> Result<DataSet, Box<dyn Error>> {
 
-    if let Ok(bundle) = specs::teams::fetch() {
+    if let Ok(bundle) = teams::fetch() {
         // cache, but ignore any IO error (best-effort)
         let _ = store::save_dataset(
             &Teams, 
@@ -67,11 +62,10 @@ pub fn collect_players(
 
     if let Some(p) = progress.as_deref_mut() {
         p.begin(ids.len());
-        p.log("Fetching rosters…");
     }
 
     // Concurrency
-    type FetchOk = (u32, specs::players::RosterBundle);
+    type FetchOk = (u32, players::RosterBundle);
     type FetchErr = (u32, String);
     
     let ids_arc = Arc::new(ids.clone());
@@ -95,7 +89,7 @@ pub fn collect_players(
                         break;
                     }
                     let team_id = ids[i];
-                    let result = match specs::players::fetch_and_extract(team_id) {
+                    let result = match players::fetch_and_extract(team_id) {
                         Ok(bundle) => Ok((team_id, bundle)),
                         Err(e) => Err((team_id, e.to_string())),
                     };
@@ -125,7 +119,9 @@ pub fn collect_players(
             }
             Ok(Err((id, msg))) => {
                 if let Some(p) = progress.as_deref_mut() {
-                    p.log(&format!("Team {id}: {msg}"));
+                    p.item_done(id);
+                    
+                    loge!("Team {id}: {msg}");
                 }
             }
             Err(_) => break, // workers ended early; bail gracefully
@@ -147,14 +143,6 @@ pub fn collect_players(
 }
 
 pub fn collect_game_results(mut progress: Option<&mut dyn Progress>,) -> Result<DataSet, Box<dyn Error>> {
-
-    if let Some(p) = progress.as_deref_mut() {
-        p.log("Fetching game results...");
-    }
-    let bundle = specs::game_results::fetch()?;
-
-    if let Some(p) = progress.as_deref_mut() {
-        p.finish();
-    }
+    let bundle = scrape::game_results::fetch()?;
     Ok(DataSet { headers: bundle.headers, rows: bundle.rows })
 }

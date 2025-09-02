@@ -15,6 +15,5 @@ pub mod data;
 pub mod file;
 pub mod progress;
 pub mod scrape;
-pub mod specs;
 pub mod store;
-pub mod teams;
+pub mod get_teams;

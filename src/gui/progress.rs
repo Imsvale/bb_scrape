@@ -13,23 +13,27 @@ impl GuiProgress {
         Self { status, done: 0, total: 0 }
     }
     fn set_status(&self, msg: impl Into<String>) {
-        *self.status.lock().unwrap() = msg.into();
+        let text = msg.into();
+        *self.status.lock().unwrap() = text;
     }
 }
 
 impl Progress for GuiProgress {
     fn begin(&mut self, total: usize) {
         self.total = total;
-        self.set_status(format!("Starting… {} team(s)", total));
     }
     fn log(&mut self, msg: &str) {
-        self.set_status(msg.to_string());
+        self.set_status(s!(msg));
     }
     fn item_done(&mut self, team_id: u32) {
         self.done += 1;
         self.set_status(format!("Fetched team {} ({}/{})", team_id, self.done, self.total));
     }
     fn finish(&mut self) {
-        self.set_status("Fetch complete".to_string());
+        if self.total == 0 {
+            self.set_status(s!("Fetch complete")); // no counts if we never began
+        } else {
+            self.set_status(format!("Fetch complete ({}/{})", self.done, self.total));
+        }
     }
 }

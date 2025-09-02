@@ -4,9 +4,10 @@ use std::io::Write;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-static LOG_FILE: &str = ".store/debug.log";
+static LOG_FILE: &str = ".store/bb_scrape.log";
 static LOG_LOCK: Mutex<()> = Mutex::new(());
 static START: OnceLock<Instant> = OnceLock::new();
+static MIN_LEVEL: OnceLock<Level> = OnceLock::new();
 
 fn start() -> Instant {
     *START.get_or_init(Instant::now)
@@ -21,8 +22,37 @@ fn fmt_elapsed(ms: u128) -> String {
     format!("{h:02}:{m:02}:{s:02}.{ms:03}")
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Level { Debug, Info, Error }
+
+fn parse_level(s: &str) -> Option<Level> {
+    match s.to_ascii_uppercase().as_str() {
+        "DEBUG" => Some(Level::Debug),
+        "INFO"  => Some(Level::Info),
+        "ERROR" => Some(Level::Error),
+        _ => None,
+    }
+}
+
+fn min_level() -> Level {
+    *MIN_LEVEL.get_or_init(|| {
+        // Default DEBUG in debug builds, INFO in release
+        let default = if cfg!(debug_assertions) { Level::Debug } else { Level::Info };
+        match std::env::var("BB_LOG_LEVEL").ok().and_then(|v| parse_level(&v)) {
+            Some(lvl) => lvl,
+            None => default,
+        }
+    })
+}
+
+fn level_of(s: &str) -> Level {
+    parse_level(s).unwrap_or(Level::Info)
+}
+
 /// Internal logging function
 pub fn write_log(level: &str, msg: &str) {
+    // Gate by level
+    if level_of(level) < min_level() { return; }
     let elapsed = fmt_elapsed(start().elapsed().as_millis());
     let line = format!("[{elapsed}][{level}] {msg}\n");
 

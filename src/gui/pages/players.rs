@@ -20,6 +20,9 @@ impl Page for PlayersPage {
     fn kind(&self) -> PageKind { Players }
     fn title(&self) -> &'static str { "Players" }
 
+    // Non-numeric: 0 Name, 2 Race, 3 Team. Column 1 (Number) and 4..end are numeric.
+    fn non_numeric_columns(&self) -> &'static [usize] { &[0, 2, 3] }
+
     fn draw_controls(&self, ui: &mut egui::Ui, state: &mut AppState) -> bool {
         // Players-only toggle: Keep '#'
         let mut changed = false;
@@ -33,8 +36,13 @@ impl Page for PlayersPage {
     fn scrape(
         &self,
         state: &AppState,
-        progress: Option<&mut dyn Progress>,
+        mut progress: Option<&mut dyn Progress>,
     ) -> Result<DataSet, Box<dyn Error>> {
+
+        if let Some(p) = progress.as_deref_mut() {
+            p.begin(1);
+        }
+        
         let ds = scrape::collect_players(&state.options.scrape, progress)?;
         Ok(ds)
     }

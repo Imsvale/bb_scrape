@@ -28,6 +28,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
                 app.set_current_index(idx);
                 let new_kind = page.kind();
                 logf!("UI: Tab switch {:?} → {:?}", prev, new_kind);
+                app.status("Ready");
 
                 // Keep scrape options aligned and rebuild the table.
                 app.state.options.scrape.page = new_kind;

@@ -3,9 +3,9 @@
 // Folder module facade: re-export public entrypoints.
 // Submodules stay private; consumers only see actions::{copy,export,scrape}.
 
-mod copy;    // src/gui/actions/copy.rs
-mod export;  // src/gui/actions/export.rs
-mod scrape;  // src/gui/actions/scrape.rs
+pub mod copy;    // src/gui/actions/copy.rs
+pub mod export;  // src/gui/actions/export.rs
+pub mod scrape;  // src/gui/actions/scrape.rs
 
 pub use copy::copy;
 pub use export::export;

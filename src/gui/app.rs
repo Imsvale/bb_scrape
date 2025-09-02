@@ -2,14 +2,14 @@
 use std::{
     collections::HashMap,
     error::Error,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, thread,
 };
 
 use eframe::egui;
 
 use crate::{    
     store,
-    teams,
+    get_teams,
     config::{
         state::{AppState, GuiState},
         options::{ TeamSelector, PageKind::{ self, * }}}
@@ -22,6 +22,7 @@ use super::{
 };
 
 use crate::data::{RawData, Selection, SelectionView};
+use super::actions::scrape::ScrapeOutcome;
 
 pub fn run(options: eframe::NativeOptions) -> Result<(), Box<dyn Error>> {
     eframe::run_native(
@@ -51,6 +52,7 @@ pub struct App {
     // Status/progress (workers write here)
     pub status: Arc<Mutex<String>>,
     pub running: bool,
+    pub scrape_handle: Option<thread::JoinHandle<ScrapeOutcome>>,
 
     // Per-page canonical data + cached views
     pub raw_data: HashMap<PageKind, RawData>,
@@ -64,7 +66,7 @@ pub struct App {
 impl App {
     pub fn new(mut state: AppState) -> Self {
         // Teams list (fallback)
-        let teams = match teams::load() {
+        let teams = match get_teams::load() {
             Ok(v) if !v.is_empty() => v,
             _ => (0u32..32).map(|id| (id, format!("Team {}", id))).collect(),
         };
@@ -152,6 +154,7 @@ impl App {
             row_ix,
             status: Arc::new(Mutex::new(status)),
             running: false,
+            scrape_handle: None,
             raw_data,
             row_ix_cache,
         }
@@ -243,13 +246,11 @@ impl App {
 
         if let Some(raw) = self.raw_data.get(&kind) {
 
-            // Set headers from raw or defaults once
-            self.headers = match &raw.dataset().headers {
-                Some(h) => Some(h.clone()),
-                None => page
-                    .default_headers()
-                    .map(|hs| hs.iter().map(|s| s.to_string()).collect()),
-            };
+            // Prefer page-provided defaults when available; otherwise use dataset headers.
+            self.headers = page
+                .default_headers()
+                .map(|hs| hs.iter().map(|s| s.to_string()).collect())
+                .or_else(|| raw.dataset().headers.clone());
 
             let sel  = Selection { ids: &self.state.gui.selected_team_ids, teams: &self.teams };
             let mask = sel.to_key_mask();
@@ -276,6 +277,14 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+
+        crate::gui::actions::scrape::poll(self);
+
+        if self.running {
+            // Repaint while spinner animates; throttle a bit to save CPU
+            ctx.request_repaint_after(std::time::Duration::from_millis(60));
+        }
+
         egui::SidePanel::left("teams")
             .resizable(false)
             .show(ctx, |ui| {
@@ -287,7 +296,7 @@ impl eframe::App for App {
 
             ui.separator();
 
-            export_bar::draw(ui, self);
+            action_buttons::draw(ui, self);
 
             ui.separator();
 

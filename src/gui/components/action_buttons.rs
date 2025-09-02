@@ -1,6 +1,6 @@
-// src/gui/components/export_bar.rs
+// src/gui/components/action_buttons.rs
 
-use eframe::egui::{self, Checkbox};
+use eframe::egui::{self, Checkbox, widgets::Spinner};
 use crate::{
     gui::app::App,
     config::options::{
@@ -114,7 +114,8 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
         let red = egui::Color32::from_rgb(220, 30, 30);
         let black = egui::Color32::BLACK;
 
-        let button_scrape = ui.add(
+        let button_scrape = ui.add_enabled(
+            !app.running,
             egui::Button::new(
                 egui::RichText::new("SCRAPE")
                 .color(black)
@@ -125,7 +126,12 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
             actions::scrape(app); 
         }
 
+        if app.running {
+            ui.add(Spinner::new().size(16.0));
+        }
+
         let status = app.status.lock().unwrap().clone();
-        ui.label(format!("Status: {status}"));
+
+        ui.label(status);
     });
 }

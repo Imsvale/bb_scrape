@@ -1,5 +1,6 @@
+// src/gui/pages/game_results.rs
 use std::error::Error;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use eframe::egui;
 
 use crate::config::options::PageKind;
@@ -15,7 +16,7 @@ pub struct GameResultsPage;
 pub static PAGE: GameResultsPage = GameResultsPage;
 
 const HEADERS: [&str; 7] = [
-    "S","W","Home team","Home","Away","Away team","Match id"
+    "S","W","Home","H","A","Away","Match id"
 ];
 
 impl Page for GameResultsPage {
@@ -26,9 +27,12 @@ impl Page for GameResultsPage {
         Some(&HEADERS)
     }
 
+    // Non-numeric: 2 Home team, 5 Away team. All other columns are numeric.
+    fn non_numeric_columns(&self) -> &'static [usize] { &[2, 5] }
+
     fn preferred_column_widths(&self) -> Option<&'static [usize]> {
         // Season, Week, Home Team, Home, Away, Away Team, Match id
-        Some(&[25, 25, 200, 30, 30, 200, 92])
+        Some(&[20, 20, 170, 20, 20, 170, 50])
     }
 
     fn draw_controls(&self, ui: &mut egui::Ui, state: &mut AppState) -> bool {
@@ -46,92 +50,22 @@ impl Page for GameResultsPage {
     fn scrape(
         &self,
         _state: &AppState,
-        progress: Option<&mut dyn Progress>,
+        mut progress: Option<&mut dyn Progress>,
     ) -> Result<DataSet, Box<dyn Error>> {
-        // Use the top-level router to run the correct scraper
-        let ds = scrape::collect_game_results(progress)?;
-        Ok(ds)
+        if let Some(p) = progress.as_deref_mut() {
+            p.begin(0);
+        }
+        scrape::collect_game_results(progress) // → Result<DataSet>
     }
 
-    fn key_column(&self) -> Option<usize> { Some(6) }
+    
 
+    /// Game Results: the scrape is whole-season, so accept it atomically.
     fn merge(&self, into: &mut DataSet, new: DataSet) {
-        const KEY: usize = 6;
-
-        // 1) Headers: adopt if ours are missing
-        if into.headers.is_none() && new.headers.is_some() {
-            into.headers = new.headers;
-        }
-
-        // 2) Build indexes on existing rows:
-        use std::collections::HashMap;
-
-        // by ID (only for rows that already have an ID)
-        let mut by_id: HashMap<String, usize> = HashMap::new();
-
-        // provisional index: (season, week, home, away) -> row index
-        // only for rows that DON'T have an ID yet
-        let mut provisional: HashMap<(String, String, String, String), usize> = HashMap::new();
-
-        for (i, r) in into.rows.iter().enumerate() {
-            let id = r.get(KEY).map(|s| s.as_str()).unwrap_or("");
-            if !id.is_empty() {
-                by_id.insert(id.to_string(), i);
-            } else {
-                // only index rows lacking an id
-                let k = (
-                    r.get(0).cloned().unwrap_or_default(), // season
-                    r.get(1).cloned().unwrap_or_default(), // week
-                    r.get(2).cloned().unwrap_or_default(), // home
-                    r.get(5).cloned().unwrap_or_default(), // away
-                );
-                provisional.insert(k, i);
-            }
-        }
-
-        // 3) Integrate new rows
-        for r in new.rows {
-            let id = r.get(KEY).map(|s| s.as_str()).unwrap_or("");
-
-            if !id.is_empty() {
-                // prefer ID upsert
-                if let Some(&idx) = by_id.get(id) {
-                    into.rows[idx] = r;
-                    continue;
-                }
-                // otherwise try promoting a provisional match
-                let k = (
-                    r.get(0).cloned().unwrap_or_default(),
-                    r.get(1).cloned().unwrap_or_default(),
-                    r.get(2).cloned().unwrap_or_default(),
-                    r.get(5).cloned().unwrap_or_default(),
-                );
-                if let Some(&idx) = provisional.get(&k) {
-                    into.rows[idx] = r;
-                    // row now has an ID; our provisional index is stale, but
-                    // we don't need it after the merge pass, so we don't rebalance it.
-                    continue;
-                }
-                // brand new game with ID
-                by_id.insert(id.to_string(), into.rows.len());
-                into.rows.push(r);
-            } else {
-                // No ID yet: use/replace provisional row if present; else append
-                let k = (
-                    r.get(0).cloned().unwrap_or_default(),
-                    r.get(1).cloned().unwrap_or_default(),
-                    r.get(2).cloned().unwrap_or_default(),
-                    r.get(5).cloned().unwrap_or_default(),
-                );
-                if let Some(&idx) = provisional.get(&k) {
-                    into.rows[idx] = r;
-                } else {
-                    provisional.insert(k, into.rows.len());
-                    into.rows.push(r);
-                }
-            }
-        }
+        // We already validated `new` in actions::scrape before calling merge.
+        *into = new;
     }
+
 
     fn filter_row_indices_for_selection(
         &self,
@@ -139,12 +73,36 @@ impl Page for GameResultsPage {
         teams: &[(u32, String)],
         rows: &Vec<Vec<String>>,
     ) -> Option<Vec<usize>> {
-        let sel: HashSet<&str> = selected_ids.iter()
+
+        // Game Results can compute indices in O(n), so we *always* return Some(...).
+        // Reserve `None` only for pages that *cannot* provide indices (force fallback).
+
+        // 1) Fast paths that keep caller simple and avoid any fallback logic:
+
+        // (a) Nothing selected → empty projection.
+        if selected_ids.is_empty() {
+            return Some(Vec::new());
+        }
+
+        // (b) All teams selected → identity projection (all row indices).
+        if selected_ids.len() == teams.len() {
+            return Some((0..rows.len()).collect());
+        }
+
+        // 2) Partial selection → build a set of selected team *names*.
+        //
+        // Page rows store names (not ids), so we map ids → names using the UI's
+        // canonical (id, name) list. Using &str avoids allocating new Strings.
+        let sel: HashSet<&str> = selected_ids
+            .iter()
             .filter_map(|id| teams.iter().find(|(tid, _)| tid == id))
             .map(|(_, name)| name.as_str())
             .collect();
 
-        // Cols: 2 Home team, 5 Away team
+        // 3) Columns in this page shape:
+        //    0 Season, 1 Week, 2 Home team, 3 Home result, 4 Away result, 5 Away team, 6 Match id
+        //
+        // Keep any row where either the Home team or the Away team is in the selection.
         let ix = rows.iter().enumerate()
             .filter(|(_, r)| {
                 r.get(2).map(|s| sel.contains(s.as_str())).unwrap_or(false) ||
@@ -213,5 +171,94 @@ impl Page for GameResultsPage {
         let hdr_ok = ds.headers.as_ref().map(|h| h.len() == 7).unwrap_or(true);
         let rows_ok = ds.rows.iter().all(|r| r.len() == 7);
         hdr_ok && rows_ok
+    }
+
+    fn validate_scrape(
+        &self,
+        _state: &AppState,
+        teams: &[(u32, String)],
+        new: &DataSet,
+    ) -> Result<(), String> {
+        
+        let n = teams.len();
+        if n == 0 || n > 32 {
+            return Err(format!("Validator expects 1..=32 teams; got {}", n));
+        }
+        
+        // We assume 32 teams (fits in u32). If it ever changes, bump here.
+        let full_mask: u32 = if n == 32 { u32::MAX } else { (1u32 << n) - 1 };
+
+        // Map canonical team name -> bit (use the UI’s teams list as ground truth)
+        let mut bit_of: HashMap<&str, u32> = HashMap::with_capacity(teams.len());
+        for (idx, (_, name)) in teams.iter().enumerate() {
+            bit_of.insert(name.as_str(), 1u32 << idx);
+        }
+
+        // Per (season, week) mask of teams seen
+        let mut week_mask: HashMap<(String, String), u32> = HashMap::new();
+
+        // Duplicate detection
+        let mut seen_match_id: HashSet<&str> = HashSet::new();
+        // Unordered “game signature” per (S,W): (min(team), max(team))
+        let mut seen_game: HashSet<(String, String, String, String)> = HashSet::new();
+
+        for r in &new.rows {
+            if r.len() < 7 {
+                return Err("Row has fewer than 7 columns (S,W,Home team,Home,Away,Away team,Match id)".into());
+            }
+            let s     = r[0].trim().to_string();
+            let w     = r[1].trim().to_string();
+            let home  = r[2].trim();
+            let away  = r[5].trim();
+            let mid   = r[6].trim();
+
+            if home.is_empty() || away.is_empty() {
+                return Err(format!("Empty team name in S={} W={}", s, w));
+            }
+            if home == away {
+                return Err(format!("Home==Away in S={}, W={} ({})", s, w, home));
+            }
+
+            // Duplicate game (by team pair) within the same week, independent of match id
+            let (a, b) = if home <= away { (home.to_string(), away.to_string()) }
+                         else            { (away.to_string(), home.to_string()) };
+            if !seen_game.insert((s.clone(), w.clone(), a, b)) {
+                return Err(format!("Duplicate game by teams in S={}, W={}", s, w));
+            }
+
+            // Duplicate match id (only if present; future games often blank)
+            if !mid.is_empty() && !seen_match_id.insert(mid) {
+                return Err(format!("Duplicate match id {} in S={}, W={}", mid, s, w));
+            }
+
+            // Bitmask: each team exactly once per week
+            let entry = week_mask.entry((s, w)).or_insert(0u32);
+
+            let hb = *bit_of.get(home)
+                .ok_or_else(|| format!("Unknown team name '{}' in results", home))?;
+            if (*entry & hb) != 0 {
+                return Err(format!("Team '{}' appears twice in the same week", home));
+            }
+            *entry |= hb;
+
+            let ab = *bit_of.get(away)
+                .ok_or_else(|| format!("Unknown team name '{}' in results", away))?;
+            if (*entry & ab) != 0 {
+                return Err(format!("Team '{}' appears twice in the same week", away));
+            }
+            *entry |= ab;
+        }
+
+        // Every week must have exactly all teams
+        for ((s, w), mask) in week_mask {
+            if mask != full_mask {
+                return Err(format!(
+                    "Incomplete/extra teams in S={}, W={} (got mask {:032b}, expected {:032b})",
+                    s, w, mask, full_mask
+                ));
+            }
+        }
+
+        Ok(())
     }
 }

@@ -27,12 +27,12 @@ pub trait Page: Send + Sync + 'static {
         None
     }
 
-    /// Return the column index of a unique key if the page has one
-    /// (e.g. Some(6) for Game Results = "Match id"); otherwise None.
-    fn key_column(&self) -> Option<usize> { None }
-
     /// Optional: per-page column widths (in px-ish)
     fn preferred_column_widths(&self) -> Option<&'static [usize]> { None }
+
+    /// Static list of non-numeric column indices for alignment purposes.
+    /// Default: none (treat all columns as numeric).
+    fn non_numeric_columns(&self) -> &'static [usize] { &[] }
 
     /// Draw page-specific controls above the table. 
     /// Return true if any control changed, so the app can rebuild the view.
@@ -74,6 +74,17 @@ pub trait Page: Send + Sync + 'static {
     ) -> (Option<Vec<String>>, Vec<Vec<String>>) { (headers.clone(), rows.clone()) }
 
     fn validate_cache(&self, _ds: &DataSet) -> bool { true }
+
+    /// Optional: validate a freshly scraped dataset before we accept it.
+    /// Default = accept everything.
+    fn validate_scrape(
+        &self,
+        _state: &AppState,
+        _teams: &[(u32, String)],
+        _new: &DataSet,
+    ) -> Result<(), String> {
+        Ok(())
+    }
 
     /// Whether "per-team export" is applicable on this page.
     /// If false, the checkbox is grayed out.
