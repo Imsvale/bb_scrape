@@ -12,7 +12,7 @@
 Thumbs.db
 
 # App artifacts
-
+/artifacts/
 /out/
 /.store/
 /.ignore/
