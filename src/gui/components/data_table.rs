@@ -64,11 +64,13 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
                             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                             if numeric_cols.get(ci).copied().unwrap_or(false) {
                                 ui.centered_and_justified(|ui| {
-                                    ui.label(RichText::new(h).strong());
+                                    let resp = ui.add(egui::Label::new(RichText::new(h).strong()).selectable(false));
+                                    resp.on_hover_cursor(egui::CursorIcon::Default);
                                 });
                             } else {
                                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                    ui.label(RichText::new(h).strong());
+                                    let resp = ui.add(egui::Label::new(RichText::new(h).strong()).selectable(false));
+                                    resp.on_hover_cursor(egui::CursorIcon::Default);
                                 });
                             }
                         });
@@ -81,11 +83,13 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
                             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                             if numeric_cols.get(i).copied().unwrap_or(false) {
                                 ui.centered_and_justified(|ui| {
-                                    ui.label(RichText::new(format!("Col {}", i + 1)).strong());
+                                    let resp = ui.add(egui::Label::new(RichText::new(format!("Col {}", i + 1)).strong()).selectable(false));
+                                    resp.on_hover_cursor(egui::CursorIcon::Default);
                                 });
                             } else {
                                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                    ui.label(RichText::new(format!("Col {}", i + 1)).strong());
+                                    let resp = ui.add(egui::Label::new(RichText::new(format!("Col {}", i + 1)).strong()).selectable(false));
+                                    resp.on_hover_cursor(egui::CursorIcon::Default);
                                 });
                             }
                         });
