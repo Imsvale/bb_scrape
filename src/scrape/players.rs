@@ -28,7 +28,7 @@ pub fn fetch_and_extract(
     let headers = {
         let mut hdr = vec![
             s!("Name"), 
-            s!("Number"), 
+            s!("#"), 
             s!("Race"), 
             s!("Team")
         ];

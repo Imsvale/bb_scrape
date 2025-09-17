@@ -61,6 +61,21 @@ pub struct App {
     /// Invalidation: bump state.teams_version on team list changes.
     /// Clear per-page on scrape merge (see Export button handler).
     pub row_ix_cache: HashMap<(PageKind, u32), Arc<Vec<usize>>>,
+
+    // Column order per page (visual only). Values are source column indexes.
+    pub col_order: HashMap<PageKind, Vec<usize>>,
+
+    // Column widths per page, keyed by source column index (f32 px-ish)
+    pub col_widths: HashMap<PageKind, Vec<f32>>,
+
+    // Transient UI state for column drag & drop
+    // Source column index (into the underlying dataset order)
+    pub dragging_source_col: Option<usize>,
+    // Preview target display index while dragging
+    pub dragging_preview_to: Option<usize>,
+    // Ghost visuals while dragging: capture pointer offset and width
+    pub dragging_ghost_offset_x: f32,
+    pub dragging_ghost_width: f32,
 }
 
 impl App {
@@ -144,7 +159,7 @@ impl App {
             (headers, Arc::new(Vec::new()))
         };
 
-        Self {
+        let mut app = Self {
             state,
             teams,
             last_clicked: None,
@@ -157,7 +172,32 @@ impl App {
             scrape_handle: None,
             raw_data,
             row_ix_cache,
+            col_order: HashMap::new(),
+            col_widths: HashMap::new(),
+            dragging_source_col: None,
+            dragging_preview_to: None,
+            dragging_ghost_offset_x: 0.0,
+            dragging_ghost_width: 0.0,
+        };
+
+        // Load cached season if available, otherwise infer from cached Game Results
+        if let Ok(Some(season)) = crate::store::load_season() {
+            app.state.season = Some(season);
+            logd!("Init: loaded cached season {}", season);
+        } else {
+            use crate::config::options::PageKind;
+            if let Some(raw) = app.raw_data.get(&PageKind::GameResults) {
+                if let Some(first) = raw.dataset().rows.get(0).and_then(|r| r.get(0)) {
+                    if let Ok(season) = first.trim().parse::<u32>() {
+                        app.state.season = Some(season);
+                        let _ = crate::store::save_season(season);
+                        logd!("Init: inferred season {} from cached Game Results", season);
+                    }
+                }
+            }
         }
+
+        app
     }
 
     /* ---------- tiny helpers ---------- */
@@ -266,11 +306,25 @@ impl App {
                 self.row_ix_cache.insert(key, arc_ix.clone());
                 self.row_ix = arc_ix;
             }
+            // Ensure column order is initialized or resized to current cols
+            let cols = self.headers.as_ref()
+                .map(|h| h.len())
+                .or_else(|| raw.dataset().rows.get(0).map(|r| r.len()))
+                .unwrap_or_else(|| page.default_headers().map(|h| h.len()).unwrap_or(0));
+            let ord = self.col_order.entry(kind).or_insert_with(|| (0..cols).collect());
+            if ord.len() != cols {
+                *ord = (0..cols).collect();
+            }
         } else {
             self.headers = page
                 .default_headers()
                 .map(|hs| hs.iter().map(|s| s!(*s)).collect());
             self.row_ix = Arc::new(Vec::new());
+            // Reset column order for empty dataset / defaults
+            let cols = self.headers.as_ref().map(|h| h.len()).unwrap_or(0);
+            if cols > 0 {
+                self.col_order.insert(kind, (0..cols).collect());
+            }
         }
     }
 }
@@ -287,6 +341,9 @@ impl eframe::App for App {
 
         egui::SidePanel::left("teams")
             .resizable(false)
+            .min_width(self.state.gui.team_panel_width)
+            .max_width(self.state.gui.team_panel_width)
+            .default_width(self.state.gui.team_panel_width)
             .show(ctx, |ui| {
                 team_panel::draw(ui, self);
             });

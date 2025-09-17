@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use bb_scrape::config::options::{AppOptions, ExportFormat, ExportType, PageKind};
-use bb_scrape::file::{self, export_dataset};
+use bb_scrape::file::export_dataset;
 
 fn tmp_dir(name: &str) -> PathBuf {
     let mut p = std::env::temp_dir();

@@ -34,8 +34,28 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
 
     ui.separator();
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        let mut changed = false;
+    // Match the scroll bar aesthetics used in the main table
+    {
+        let s = &mut ui.style_mut().spacing.scroll;
+        s.floating = false;
+        s.bar_width = 10.0;
+        s.bar_inner_margin = 0.0; // small gap between content and bar
+        s.bar_outer_margin = -6.0; // 1 px between separator line and bar
+        s.handle_min_length = 48.0;
+        s.foreground_color = true;
+        // Make the background lighter to blend with the window
+        let visuals = &mut ui.style_mut().visuals;
+        visuals.extreme_bg_color = visuals.panel_fill;
+    }
+
+    egui::ScrollArea::vertical()
+        .id_salt("teams_panel_scroll")
+        .show(ui, |ui| {
+            // Ensure the scroll area uses the full panel width so the bar hugs the edge
+            let w = ui.available_width();
+            ui.set_min_width(w);
+            ui.set_width(w);
+            let mut changed = false;
 
         for (idx, (id, name)) in app.teams.iter().enumerate() {
             let is_selected = app.state.gui.selected_team_ids.contains(id);

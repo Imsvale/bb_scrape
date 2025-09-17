@@ -49,3 +49,10 @@ codegen-units = 1
 #panic = "abort"       # no unwinding machinery
 opt-level = "z"       # or "z" for min size; "3" if you want max perf
 strip = "symbols"     # or "debuginfo"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "injuries"
+harness = false

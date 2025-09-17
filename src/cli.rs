@@ -48,6 +48,12 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         // Only change the stem when still fully-default
         options.export.set_path(crate::config::consts::DEFAULT_TEAMS_FILE);
     }
+    // Special-case Injuries: default filename should be "injuries"
+    if matches!(page, PageKind::Injuries)
+        && options.export.is_fully_default_for(PageKind::Injuries)
+    {
+        options.export.set_path("injuries");
+    }
 
     // 1) SCRAPE
     let mut cp = CliProgress::default();
@@ -55,10 +61,16 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let mut ds = match page {
         Players => scrape::collect_players(&options.scrape, Some(&mut cp))?,
         Teams => scrape::collect_teams(Some(&mut cp))?,
-        GameResults => scrape::collect_game_results(Some(&mut cp))?,
+        GameResults => {
+            let ds = scrape::collect_game_results(Some(&mut cp))?;
+            if let Some(first) = ds.rows.get(0).and_then(|r| r.get(0)) {
+                if let Ok(season) = first.trim().parse::<u32>() { let _ = store::save_season(season); }
+            }
+            ds
+        },
         SeasonStats => todo!("CLI: SeasonStats scraper not implemented yet"),
         CareerStats => todo!("CLI: CareerStats scraper not implemented yet"),
-        Injuries => todo!("CLI: Injuries scraper not implemented yet"),
+        Injuries => scrape::collect_injuries(Some(&mut cp))?,
     };
 
     // Align with GUI: if headers are missing, inject page defaults so exports include headers.
@@ -106,6 +118,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             match page {
                 PageKind::Players => file::write_export_per_team(options, &headers_to_write, &rows_to_write, team_col.unwrap())?,
                 PageKind::GameResults => file::write_export_per_team_results(options, &headers_to_write, &rows_to_write, 2, 5)?,
+                PageKind::Injuries => file::write_export_per_team_results(options, &headers_to_write, &rows_to_write, 2, 8)?,
                 _ => file::write_export_per_team(options, &headers_to_write, &rows_to_write, team_col.unwrap_or(0))?,
             }
         }

@@ -16,6 +16,7 @@ pub const DEFAULT_OUT_DIR: &str ="out";
 pub const DEFAULT_TEAMS_SUBDIR: &str = "";
 pub const DEFAULT_PLAYERS_SUBDIR: &str = "players";
 pub const DEFAULT_RESULTS_SUBDIR: &str = "results";
+pub const DEFAULT_INJURIES_SUBDIR: &str = "injuries";
 
 pub const DEFAULT_TEAMS_FILE: &str = "teams";
 pub const DEFAULT_FILE: &str = "all";

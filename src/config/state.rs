@@ -15,6 +15,9 @@ pub struct GuiState {
 
     /// Game Results page -> show/hide Match id column
     pub game_results_show_match_id: bool,
+
+    /// Fixed width for the Teams side panel
+    pub team_panel_width: f32,
 }
 
 impl Default for GuiState {
@@ -26,6 +29,7 @@ impl Default for GuiState {
             last_browse_dir: s!(),
             current_page_index: 0,
             game_results_show_match_id: true,
+            team_panel_width: 200.0,
         }
     }
 }
@@ -34,6 +38,7 @@ impl Default for GuiState {
 pub struct AppState {
     pub options: AppOptions,
     pub gui: GuiState,
+    pub season: Option<u32>,
 }
 
 impl Default for AppState {
@@ -41,6 +46,7 @@ impl Default for AppState {
         Self {
             options: AppOptions::default(),
             gui: GuiState::default(),
+            season: None,
         }
     }
 }

@@ -67,6 +67,27 @@ fn page_filename(kind: &PageKind) -> &'static str {
     }
 }
 
+// ---- Season persistence ----
+
+pub fn season_path() -> PathBuf { store_dir().join("season") }
+
+/// Save current season number to `.store/season`.
+pub fn save_season(season: u32) -> Result<PathBuf> {
+    let dir = store_dir();
+    if !dir.exists() { std::fs::create_dir_all(&dir)?; }
+    let p = season_path();
+    std::fs::write(&p, season.to_string())?;
+    Ok(p)
+}
+
+/// Load season from `.store/season` if present.
+pub fn load_season() -> Result<Option<u32>> {
+    let p = season_path();
+    if !p.exists() { return Ok(None); }
+    let s = std::fs::read_to_string(p)?;
+    Ok(s.trim().parse::<u32>().ok())
+}
+
 #[derive(Clone, Debug)]
 pub struct DataSet {
     pub headers: Option<Vec<String>>,

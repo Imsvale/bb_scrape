@@ -12,6 +12,7 @@ use crate::{
 
 pub mod players;
 pub mod game_results;
+pub mod injuries;
 
 /// Optional column hints if you later want per-page sizing.
 #[derive(Default, Debug, Clone, Copy)]

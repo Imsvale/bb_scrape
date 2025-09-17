@@ -266,6 +266,7 @@ impl ExportOptions {
             PageKind::Players     => DEFAULT_PLAYERS_SUBDIR,
             PageKind::GameResults => DEFAULT_RESULTS_SUBDIR,
             PageKind::Teams       => DEFAULT_TEAMS_SUBDIR,
+            PageKind::Injuries    => DEFAULT_INJURIES_SUBDIR,
             _ => DEFAULT_PLAYERS_SUBDIR, // extend as needed
         };
         PathBuf::from(DEFAULT_OUT_DIR).join(sub)

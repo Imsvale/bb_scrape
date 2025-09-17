@@ -501,6 +501,7 @@ pub fn export_dataset(
             match kind {
                 Players => write_export_per_team(opts, &hdrs, &rws, 3),
                 GameResults => write_export_per_team_results(opts, &hdrs, &rws, 2, 5),
+                PageKind::Injuries => write_export_per_team_results(opts, &hdrs, &rws, 2, 8),
                 _ => write_export_per_team(opts, &hdrs, &rws, 0), // best-effort
             }
         }

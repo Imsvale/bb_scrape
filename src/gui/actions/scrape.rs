@@ -75,6 +75,15 @@ pub fn scrape(app: &mut App) {
             return ScrapeOutcome::Err { kind, msg: format!("Validation failed: {msg}") };
         }
 
+        // If this page yields the season (e.g., Game Results), persist it for other pages.
+        if let PageKind::GameResults = kind {
+            if let Some(first) = ds.rows.get(0).and_then(|r| r.get(0)) {
+                if let Ok(season) = first.trim().parse::<u32>() {
+                    let _ = store::save_season(season);
+                }
+            }
+        }
+
         let page_text = match kind {
             PageKind::Players       => "players",
             PageKind::GameResults   => "games",
