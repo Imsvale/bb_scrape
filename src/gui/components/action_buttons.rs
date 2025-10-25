@@ -29,8 +29,8 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
 
         ui.horizontal(|ui| {
             ui.label("Format:");
-            ui.selectable_value(&mut fmt, UiFormat::Csv, "CSV");
             ui.selectable_value(&mut fmt, UiFormat::Tsv, "TSV");
+            ui.selectable_value(&mut fmt, UiFormat::Csv, "CSV");
         });
 
         if fmt != prev_fmt {
@@ -61,6 +61,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
     let export = &mut app.state.options.export;
 
     // --- Per-team toggle + Output field ---
+    let mut open_folder_clicked = false;
     ui.horizontal(|ui| {
         // Keep layout stable: always show the checkbox, gray it out if not applicable.
         let mut single = matches!(export.export_type, SingleFile);
@@ -92,7 +93,17 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
             app.out_path_dirty = true;
             logd!("UI: out_path_text changed (dirty=true) → {}", app.out_path_text);
         }
+
+        // Open folder button
+        if ui.button("📁").on_hover_text("Open output folder").clicked() {
+            open_folder_clicked = true;
+        }
     });
+
+    // Handle open folder after the borrow ends
+    if open_folder_clicked {
+        open_output_folder(app);
+    }
 
     // Actions: Copy / Export / Scrape
     use crate::gui::actions;
@@ -134,4 +145,108 @@ pub fn draw(ui: &mut egui::Ui, app: &mut App) {
 
         ui.label(status);
     });
+}
+
+/// Open the output folder in the system file explorer.
+fn open_output_folder(app: &App) {
+    use std::path::Path;
+    use crate::config::options::ExportType;
+
+    let export = &app.state.options.export;
+    let path = export.out_path();
+
+    // Determine the folder to open
+    let folder = match export.export_type {
+        ExportType::SingleFile => {
+            // For single file, open the parent directory
+            if let Some(parent) = path.parent() {
+                parent
+            } else {
+                Path::new(".")
+            }
+        }
+        ExportType::PerTeam => {
+            // For per-team, the path is already a directory
+            path.as_path()
+        }
+    };
+
+    // Find the nearest existing parent folder
+    let folder_to_open = find_nearest_existing_parent(folder);
+
+    // Convert to absolute path to ensure correct folder is opened
+    let absolute_folder = match std::fs::canonicalize(&folder_to_open) {
+        Ok(abs_path) => abs_path,
+        Err(e) => {
+            let msg = format!("Cannot resolve folder path: {}", e);
+            loge!("{}", msg);
+            app.status(msg);
+            return;
+        }
+    };
+
+    // Open the folder using the system default file manager
+    if let Err(e) = open_folder_in_explorer(&absolute_folder) {
+        loge!("Failed to open folder: {}", e);
+        app.status(format!("Failed to open folder: {}", e));
+    } else {
+        logf!("Opened folder: {}", absolute_folder.display());
+    }
+}
+
+/// Find the nearest existing parent folder by walking up the directory tree.
+fn find_nearest_existing_parent(path: &std::path::Path) -> std::path::PathBuf {
+    let mut current = path.to_path_buf();
+
+    // Walk up the tree until we find an existing directory
+    loop {
+        if current.exists() && current.is_dir() {
+            return current;
+        }
+
+        // Try to go to parent
+        match current.parent() {
+            Some(parent) => current = parent.to_path_buf(),
+            None => {
+                // Reached the root without finding an existing directory
+                // Fall back to current directory
+                return std::path::PathBuf::from(".");
+            }
+        }
+    }
+}
+
+/// Cross-platform function to open a folder in the system file explorer.
+fn open_folder_in_explorer(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn explorer: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn open: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn xdg-open: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("Opening folders not supported on this platform".to_string())
+    }
 }

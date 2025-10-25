@@ -1,7 +1,7 @@
 Brutalball Scraper — CLI
 
 USAGE
-  ./cli                           Scrape all players & export to out/players/all.csv
+  ./cli                           Scrape all players & export to out/players/all.tsv
   ./cli [OPTIONS]                 Scrape & export with options
   ./cli --h                       Show this help
   ./cli --list-teams              Print all team ids/names and exit
@@ -17,7 +17,7 @@ TEAM SELECTION (0–31)
                                   -t and --ids can be combined
 
 EXPORT
-  -f, --format [csv|tsv]          Output format (default: csv)
+  -f, --format [tsv|csv]          Output format (default: tsv)
   -x, --drop-headers              Drop the header row
   -s, --skip-optional             Page-agnostic: Players → remove '#'; Results → drop match id
   -m, --multi, --per-team         Each team in a separate file, named <Team_Name>.extension
@@ -32,8 +32,8 @@ MISC
 
 NOTES
   • Defaults:
-      format: CSV
-      single-file: out/players/all.csv
+      format: TSV
+      single-file: out/players/all.tsv
       per-team directory: out/players/<Team_Name>.extension
       scraper behavior: all teams
       export behavior: single file
@@ -51,10 +51,10 @@ NOTES
     • "-o dir/subdir" to specify subdirectory.
 
 EXAMPLES
-  # All players to a single file hello.csv in default directory
+  # All players to a single file hello.tsv in default directory
   cli -o hello
 
-  # Single team (id 3), single file (default, CSV)
+  # Single team (id 3), single file (default, TSV)
   cli -t 3
 
   # Two teams via repeated -t, per-team directory

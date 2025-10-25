@@ -295,9 +295,12 @@ impl Progress for CliProgress {
     fn log(&mut self, msg: &str) {
         eprintln!("{}", msg);
     }
-    fn item_done(&mut self, _team_id: u32) {
+    fn item_done(&mut self, _team_id: u32, _team_name: &str) {
         self.done += 1;
         eprintln!("Fetched {}/{}", self.done, self.total);
+    }
+    fn item_failed(&mut self, _team_id: u32, team_name: &str) {
+        eprintln!("Failed: {}", team_name);
     }
     fn finish(&mut self) {}
 }

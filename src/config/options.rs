@@ -190,7 +190,7 @@ pub struct ExportOptions {
 impl Default for ExportOptions {
     fn default() -> Self {
         Self {
-            format: Csv,
+            format: Tsv,
             export_type: SingleFile,
             out_path: OutputPath::default(),
             include_headers: true,

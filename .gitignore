@@ -11,6 +11,13 @@
 .DS_Store
 Thumbs.db
 
+# Agent
+/.claude/
+CLAUDE.md
+
+# Reports
+/reports/
+
 # App artifacts
 /artifacts/
 /out/

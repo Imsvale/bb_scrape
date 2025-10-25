@@ -8,12 +8,12 @@ A fast site scraper for Brutalball.
 
 ### Quick start (Windows)
 
-* **Download** the latest release, e.g. `bb_scrape_v1.2.0_windows_x86_64.zip`.
+* **Download** the latest release, e.g. `bb_scrape_v1.3.1_windows_x86_64.zip`.
 * **Extract** it to a suitable folder.
 * **Run** `bb_scrape.exe` for the GUI.
 * Click **SCRAPE**.
 * `Copy` to clipboard.
-* `Export` to file → `out/players/all.csv`.
+* `Export` to file → `out/players/all.tsv`.
 *  Command-line users run `cli.exe`.
 
 Tip: The left panel lets you pick which teams to scrape.
@@ -34,9 +34,9 @@ Tip: The left panel lets you pick which teams to scrape.
 * **Scrape** for **Players** and **Game results** (current season)
   * Also **teams**, but that's more of an incidental side thing.
 * **Player data:** `Name, #00, Race, Team, TV, OVR, ..., Dur, Sal`
-* **Formats:** 
+* **Formats:**
+  * Tab-separated values `(TSV)` - default
   * Comma-separated values `(CSV)`
-  * Tab-separated values `(TSV)`
 * **Toggle headers**
 * **Page-specific optionals:**
   * **Players:** Toggle player number `#` sign
@@ -59,9 +59,9 @@ Tip: The left panel lets you pick which teams to scrape.
 
 * **Export directory:**
   * `out/players`
-* **Format:** `CSV`
-* **Export file (single):** `all.csv`
-* **Export files (multi):** `<Team_Name>.csv`
+* **Format:** `TSV`
+* **Export file (single):** `all.tsv`
+* **Export files (multi):** `<Team_Name>.tsv`
 * **Local cache:** `.store`
 
 ---
@@ -74,7 +74,7 @@ Run:
 ./cli
 ```
 
-Scrapes all teams and outputs all players to default directory and file: `out/players/all.csv`.
+Scrapes all teams and outputs all players to default directory and file: `out/players/all.tsv`.
 
 Print help:
 
@@ -98,7 +98,7 @@ EXPORT:
 -m, --multi, --per-team     Per-team files (Players, Game Results)
 -x, --drop-headers          Do not write the header row
 -s, --skip-optional         Page-agnostic: Players → remove '#'; Results → drop match id
--f, --format csv|tsv        Output format (default: csv)
+-f, --format tsv|csv        Output format (default: tsv)
 -o, --out <path>            Output file path (single) or directory (per-team)
 ```
 
@@ -125,6 +125,24 @@ Examples:
 * The app stores raw datasets under `.store`.
 * On startup, it loads the cache if present.
 * Team names are refreshed with a **SCRAPE**.
+
+---
+
+## Development & Releases
+
+### Building from Source
+```bash
+cargo build --release                           # GUI
+cargo build --release --bin cli --features=cli  # CLI
+```
+
+### Creating a Release
+**Steps:**
+1. Bump version in `Cargo.toml`
+2. Update `CHANGELOG.md`
+3. Commit and push changes
+4. Run `.\scripts\zip.ps1 -BuildRelease` to build and package
+5. Create GitHub release and attach generated artifacts from `artifacts/v{version}/`
 
 ---
 

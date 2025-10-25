@@ -60,6 +60,11 @@ pub fn collect_players(
 
     let ids = resolve_ids(&scrape.teams);
 
+    // Load team names for progress reporting
+    let team_names: std::collections::HashMap<u32, String> = list_teams()
+        .into_iter()
+        .collect();
+
     if let Some(p) = progress.as_deref_mut() {
         p.begin(ids.len());
     }
@@ -114,13 +119,19 @@ pub fn collect_players(
                 }
                 per_team.push((id, bundle.rows));
                 if let Some(p) = progress.as_deref_mut() {
-                    p.item_done(id);
+                    let team_name = team_names.get(&id)
+                        .map(|s| s.as_str())
+                        .unwrap_or("Unknown Team");
+                    p.item_done(id, team_name);
                 }
             }
             Ok(Err((id, msg))) => {
                 if let Some(p) = progress.as_deref_mut() {
-                    p.item_done(id);
-                    
+                    let team_name = team_names.get(&id)
+                        .map(|s| s.as_str())
+                        .unwrap_or("Unknown Team");
+                    p.item_failed(id, team_name);
+
                     loge!("Team {id}: {msg}");
                 }
             }

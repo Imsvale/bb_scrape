@@ -16,10 +16,12 @@ pub fn fetch_and_extract(
 ) -> Result<RosterBundle, Box<dyn Error>> {
     let path = format!("team.php?i={}", team_id);
     let html_doc = net::http_get(&path)?; // see core/net.rs
+
+    // Extract and validate team name from three locations
+    let team_name = extract_and_validate_team_name(&html_doc, team_id)?;
+
     let table = slice_between_ci(&html_doc, "<table class=teamroster", "</table>")
         .ok_or("teamroster table not found")?;
-
-    let team_name = extract_team_name(table).unwrap_or_else(|| format!("Team {}", team_id));
 
     // Headers (<th> not necessarily wrapped in <tr>)
     let site_headers = read_site_headers_row(table);
@@ -91,6 +93,57 @@ pub fn fetch_and_extract(
 
 /* ---------- helpers ---------- */
 
+/// Extract and validate team name from three locations in the HTML document.
+/// All three must be present and agree, otherwise returns an error to abort the scrape.
+/// This prevents data corruption when site format changes.
+fn extract_and_validate_team_name(doc: &str, team_id: u32) -> Result<String, Box<dyn Error>> {
+    let from_title = extract_from_title(doc);
+    let from_active_tab = extract_from_active_tab(doc);
+    let from_menu_header = extract_from_menu_header(doc);
+
+    // All three must be present and agree
+    match (from_title, from_active_tab, from_menu_header) {
+        (Some(t1), Some(t2), Some(t3)) if t1 == t2 && t2 == t3 => {
+            Ok(t1)
+        }
+        (title, tab, header) => {
+            let msg = format!(
+                "Team name mismatch for team {}: title={:?}, active_tab={:?}, menu_header={:?}. \
+                Site format may have changed. Aborting scrape to prevent data corruption.",
+                team_id, title, tab, header
+            );
+            Err(msg.into())
+        }
+    }
+}
+
+/// Extract team name from <title> tag (cleanest source).
+fn extract_from_title(doc: &str) -> Option<String> {
+    slice_between_ci(doc, "<title>", "</title>")
+        .map(|s| strip_tags(normalize_entities(s)).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Extract team name from <td class="teamenuactive"> (navigation tab).
+fn extract_from_active_tab(doc: &str) -> Option<String> {
+    slice_between_ci(doc, r#"<td class="teamenuactive""#, "</td>")
+        .map(|s| {
+            let inner = inner_after_open_tag(s);
+            strip_tags(normalize_entities(&inner)).trim().to_string()
+        })
+        .filter(|s| !s.is_empty())
+}
+
+/// Extract team name from <td class="teamenuhead"> (team header).
+fn extract_from_menu_header(doc: &str) -> Option<String> {
+    slice_between_ci(doc, r#"<td class="teamenuhead""#, "</td>")
+        .map(|s| letters_only_trim(&strip_tags(normalize_entities(s))))
+        .filter(|s| !s.is_empty())
+}
+
+/// Legacy helper: extract team name from teamroster table (old format).
+/// No longer used in main flow but kept for tests.
+#[allow(dead_code)]
 fn extract_team_name(table_inner: &str) -> Option<String> {
     if let Some((tr_s, tr_e)) = next_tag_block_ci(table_inner, "<tr", "</tr>", 0) {
         let tr = &table_inner[tr_s..tr_e];
@@ -120,6 +173,7 @@ fn extract_team_name(table_inner: &str) -> Option<String> {
 /// Remove a trailing parenthesized season record like "(6 - 0 - 2)".
 /// Conservative check: only if the parentheses content contains only digits,
 /// spaces and hyphens, with at least one hyphen and some digits.
+#[allow(dead_code)]
 fn strip_record_suffix(s: &str) -> String {
     let t = s.trim();
     if t.ends_with(')') {
@@ -204,6 +258,90 @@ mod tests {
         let inner = html; // function scans whole string for <th> blocks
         let hdrs = read_site_headers_row(inner);
         assert_eq!(hdrs, vec!["A", "B"]);
+    }
+
+    #[test]
+    fn extract_and_validate_all_three_agree() {
+        // All three locations present and agree - should succeed
+        let doc = r#"
+            <head><title>Failurewood Hills</title></head>
+            <table class=teamenu>
+              <tr><td colspan="100%">
+                <table class=cleantable>
+                  <tr>
+                    <td class="teamenuhead">&nbsp;Failurewood Hills</td>
+                  </tr>
+                </table>
+              </td></tr>
+              <tr>
+                <td class="teamenuactive"><strong>Failurewood Hills</strong></td>
+              </tr>
+            </table>
+        "#;
+        let result = extract_and_validate_team_name(doc, 20);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "Failurewood Hills");
+    }
+
+    #[test]
+    fn extract_and_validate_mismatch_fails() {
+        // Title says one thing, active tab says another - should fail
+        let doc = r#"
+            <head><title>Wrong Team</title></head>
+            <table class=teamenu>
+              <tr><td colspan="100%">
+                <table class=cleantable>
+                  <tr>
+                    <td class="teamenuhead">&nbsp;Failurewood Hills</td>
+                  </tr>
+                </table>
+              </td></tr>
+              <tr>
+                <td class="teamenuactive"><strong>Failurewood Hills</strong></td>
+              </tr>
+            </table>
+        "#;
+        let result = extract_and_validate_team_name(doc, 20);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("mismatch"));
+    }
+
+    #[test]
+    fn extract_and_validate_missing_location_fails() {
+        // Missing active tab - should fail
+        let doc = r#"
+            <head><title>Failurewood Hills</title></head>
+            <table class=teamenu>
+              <tr><td colspan="100%">
+                <table class=cleantable>
+                  <tr>
+                    <td class="teamenuhead">&nbsp;Failurewood Hills</td>
+                  </tr>
+                </table>
+              </td></tr>
+            </table>
+        "#;
+        let result = extract_and_validate_team_name(doc, 20);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("mismatch"));
+    }
+
+    #[test]
+    fn extract_from_title_works() {
+        let doc = r#"<head><title>Red Star Pathfinders</title></head>"#;
+        assert_eq!(extract_from_title(doc).as_deref(), Some("Red Star Pathfinders"));
+    }
+
+    #[test]
+    fn extract_from_active_tab_works() {
+        let doc = r#"<td class="teamenuactive"><strong>Vuvu Boys</strong></td>"#;
+        assert_eq!(extract_from_active_tab(doc).as_deref(), Some("Vuvu Boys"));
+    }
+
+    #[test]
+    fn extract_from_menu_header_works() {
+        let doc = r#"<td class="teamenuhead">&nbsp;Bulldozer Power</td>"#;
+        assert_eq!(extract_from_menu_header(doc).as_deref(), Some("Bulldozer Power"));
     }
 }
 
