@@ -1,4 +1,4 @@
-# scripts/zip.ps1
+# scripts/windows/build.ps1
 param(
   [string]$OutDir = "artifacts",
   [string]$CargoTomlPath = "Cargo.toml",
@@ -45,7 +45,6 @@ try {
 if ($BuildRelease) {
   Write-Host "Building release binaries..."
   cargo build --release | Out-Host
-  cargo build --release --bin cli --features cli | Out-Host
 }
 
 $baseFiles = @(
@@ -78,10 +77,27 @@ $sevenZip = if ($UsePsZip) { $null } else { Get-SevenZipPath }
 
 if ($sevenZip) {
   Write-Host "Using 7-Zip at $sevenZip"
-  & $sevenZip a -tzip -mx=9 -bd -- "$zipPath" @files | Out-Host
+  # Add files individually from their directories to put them at zip root
+  foreach ($f in $files) {
+    $fileName = Split-Path -Leaf $f
+    & $sevenZip a -tzip -mx=9 -bd -- "$zipPath" "$f" | Out-Null
+    & $sevenZip rn -bd -- "$zipPath" "$f" "$fileName" | Out-Null
+  }
+  Write-Host "Archive created with top-level files"
 } else {
   Write-Host "7-Zip not found; using Compress-Archive"
-  Compress-Archive -Path $files -DestinationPath $zipPath -CompressionLevel Optimal -Force
+  # For Compress-Archive, we need to copy files to temp dir to flatten structure
+  $tempDir = Join-Path $env:TEMP "bb_scrape_zip_temp_$(Get-Random)"
+  try {
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    foreach ($f in $files) {
+      $fileName = Split-Path -Leaf $f
+      Copy-Item -LiteralPath $f -Destination (Join-Path $tempDir $fileName)
+    }
+    Compress-Archive -Path (Join-Path $tempDir "*") -DestinationPath $zipPath -CompressionLevel Optimal -Force
+  } finally {
+    if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }
+  }
 }
 
 if (!(Test-Path -LiteralPath $zipPath)) {

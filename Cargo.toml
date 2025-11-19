@@ -33,15 +33,9 @@ egui_extras = { version = "0.32", default-features = false }
 # Only decode PNG for the window icon (not JPEG/GIF/etc.)
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-color-eyre = { version = "0.6", optional = true }
-
 [[bin]]
 name = "cli"
 path = "src/bin/cli.rs"
-required-features = ["cli"]
-
-[features]
-cli = ["dep:color-eyre"]
 
 [profile.release]
 lto = "thin"          # "fat" shrinks a bit more; slower compile

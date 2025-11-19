@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Build:** Cross-platform packaging scripts organized by platform
+  - `scripts/windows/build.ps1` - Windows packaging (renamed from `zip.ps1`)
+  - `scripts/mac-linux/build.sh` - Linux/macOS packaging with auto-detection of platform and architecture
+  - `scripts/mac-linux/setup.sh` - Automated setup for non-developers
+  - Supports x86_64 and aarch64 (Apple Silicon) architectures
+  - All scripts flatten folder structure (binaries at zip root)
+
+### Changed
+- **Build:** Removed CLI feature gate - `cargo build --release` now builds both binaries
+  - Simplified build process (no more `--features=cli` needed)
+  - Removed unused `color-eyre` dependency (127 KB saved on CLI binary)
+- **Release:** Updated packaging to support Windows, Linux, and macOS
+  - Windows: `bb_scrape_v{version}_windows_x86_64.zip`
+  - Linux: `bb_scrape_v{version}_linux_x86_64.zip`
+  - macOS: `bb_scrape_v{version}_macos_x86_64.zip` / `macos_aarch64.zip`
+
 ## [1.3.1] - 2025-01-25
 
 ### Fixed
