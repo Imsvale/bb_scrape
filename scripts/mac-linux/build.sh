@@ -146,7 +146,13 @@ fi
 # Verify all files exist
 for file in "${FILES[@]}"; do
   if [[ ! -f "$file" ]]; then
-    echo "File not found: $file" >&2
+    echo "Error: File not found: $file" >&2
+    echo "" >&2
+    echo "The release binaries have not been built yet." >&2
+    echo "Please run one of the following:" >&2
+    echo "  1. Build and package: $0 --build-release" >&2
+    echo "  2. Build first:       cargo build --release" >&2
+    echo "     Then package:      $0" >&2
     exit 1
   fi
 done

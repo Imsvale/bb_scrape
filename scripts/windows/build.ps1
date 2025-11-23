@@ -59,7 +59,16 @@ $files += $baseFiles
 if ($ExtraFiles) { $files += $ExtraFiles }
 
 foreach ($f in $files) {
-  if (!(Test-Path -LiteralPath $f)) { throw "File not found: $f" }
+  if (!(Test-Path -LiteralPath $f)) {
+    Write-Host "Error: File not found: $f" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "The release binaries have not been built yet." -ForegroundColor Yellow
+    Write-Host "Please run one of the following:"
+    Write-Host "  1. Build and package: .\scripts\windows\build.ps1 -BuildRelease"
+    Write-Host "  2. Build first:       cargo build --release"
+    Write-Host "     Then package:      .\scripts\windows\build.ps1"
+    exit 1
+  }
 }
 
 $version = Get-VersionFromCargoToml -path $CargoTomlPath
