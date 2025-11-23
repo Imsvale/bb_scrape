@@ -87,9 +87,9 @@ cargo build --release --bin cli        # CLI only
    ./target/release/cli --help # CLI
    ```
 
-6. **Package (optional)**:
+6. **Build and package** (creates distribution zip):
    ```bash
-   ./scripts/mac-linux/build.sh --build-release
+   ./scripts/mac-linux/build.sh
    ```
 
 ### Linux - Complete Setup
@@ -242,18 +242,20 @@ Platform-specific scripts automate building and packaging:
 
 **Windows (PowerShell):**
 ```powershell
-.\scripts\windows\build.ps1 -BuildRelease  # Build binaries and create release archive
-.\scripts\windows\build.ps1                # Package only (skip build)
+.\scripts\windows\build.ps1              # Build and package (default)
+.\scripts\windows\build.ps1 -BuildOnly   # Build only, skip packaging
+.\scripts\windows\build.ps1 -PackageOnly # Package only (binaries must exist)
 ```
 
 **Linux/macOS (Bash):**
 ```bash
-./scripts/mac-linux/build.sh --build-release  # Build binaries and create release archive
-./scripts/mac-linux/build.sh                  # Package only (skip build)
+./scripts/mac-linux/build.sh              # Build and package (default)
+./scripts/mac-linux/build.sh --build-only # Build only, skip packaging
+./scripts/mac-linux/build.sh --package-only # Package only (binaries must exist)
 ```
 
 **What they do:**
-- Build release binaries (with `-BuildRelease` or `--build-release` flag)
+- **Default**: Build release binaries AND create distribution package
 - Extract version from `Cargo.toml`
 - Create versioned directory: `artifacts/v{version}/`
 - Create platform-specific archive with flattened structure (executables at root)
@@ -278,13 +280,13 @@ git push
 # 4. Build and package on each platform:
 
 # Windows (PowerShell):
-.\scripts\windows\build.ps1 -BuildRelease
+.\scripts\windows\build.ps1
 
 # Linux (Bash):
-./scripts/mac-linux/build.sh --build-release
+./scripts/mac-linux/build.sh
 
 # macOS (Bash):
-./scripts/mac-linux/build.sh --build-release
+./scripts/mac-linux/build.sh
 
 # 5. Create GitHub release with all platform artifacts
 git tag v{version}

@@ -4,11 +4,18 @@ param(
   [string]$CargoTomlPath = "Cargo.toml",
   [string]$Arch = "windows_x86_64",
   [string[]]$ExtraFiles = @(),
-  [switch]$BuildRelease,
+  [switch]$BuildOnly,
+  [switch]$PackageOnly,
   [switch]$UsePsZip
 )
 
 $ErrorActionPreference = "Stop"
+
+# Validate conflicting options
+if ($BuildOnly -and $PackageOnly) {
+  Write-Host "Error: -BuildOnly and -PackageOnly are mutually exclusive" -ForegroundColor Red
+  exit 1
+}
 
 function Get-VersionFromCargoToml([string]$path) {
   if (!(Test-Path -LiteralPath $path)) { throw "Cargo.toml not found at '$path'" }
@@ -42,9 +49,20 @@ try {
   if ($repoRoot) { Set-Location $repoRoot }
 } catch { }
 
-if ($BuildRelease) {
+# Build release binaries (default behavior unless -PackageOnly is specified)
+if (-not $PackageOnly) {
   Write-Host "Building release binaries..."
   cargo build --release | Out-Host
+
+  # If -BuildOnly, exit after building
+  if ($BuildOnly) {
+    Write-Host ""
+    Write-Host "Build complete!" -ForegroundColor Green
+    Write-Host "Binaries created:"
+    Write-Host "  GUI: target\release\bb_scrape.exe"
+    Write-Host "  CLI: target\release\cli.exe"
+    exit 0
+  }
 }
 
 $baseFiles = @(
@@ -62,11 +80,16 @@ foreach ($f in $files) {
   if (!(Test-Path -LiteralPath $f)) {
     Write-Host "Error: File not found: $f" -ForegroundColor Red
     Write-Host ""
-    Write-Host "The release binaries have not been built yet." -ForegroundColor Yellow
-    Write-Host "Please run one of the following:"
-    Write-Host "  1. Build and package: .\scripts\windows\build.ps1 -BuildRelease"
-    Write-Host "  2. Build first:       cargo build --release"
-    Write-Host "     Then package:      .\scripts\windows\build.ps1"
+    if ($PackageOnly) {
+      Write-Host "The -PackageOnly flag was used, but binaries don't exist." -ForegroundColor Yellow
+      Write-Host "Please build first:"
+      Write-Host "  cargo build --release"
+      Write-Host "Or run without -PackageOnly to build automatically:"
+      Write-Host "  .\scripts\windows\build.ps1"
+    } else {
+      Write-Host "Build failed or binaries were not created." -ForegroundColor Yellow
+      Write-Host "Please check the build output above for errors."
+    }
     exit 1
   }
 }

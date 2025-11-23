@@ -8,7 +8,8 @@ set -e
 OUT_DIR="artifacts"
 CARGO_TOML_PATH="Cargo.toml"
 EXTRA_FILES=()
-BUILD_RELEASE=false
+BUILD_ONLY=false
+PACKAGE_ONLY=false
 
 # Detect platform
 OS_NAME=$(uname -s)
@@ -63,24 +64,33 @@ while [[ $# -gt 0 ]]; do
       EXTRA_FILES+=("$2")
       shift 2
       ;;
-    --build-release)
-      BUILD_RELEASE=true
+    --build-only)
+      BUILD_ONLY=true
+      shift
+      ;;
+    --package-only)
+      PACKAGE_ONLY=true
       shift
       ;;
     --help|-h)
       cat <<EOF
 Usage: $0 [OPTIONS]
 
+Default behavior: Build release binaries and create distribution package
+
 Options:
   --out-dir DIR         Output directory (default: artifacts)
   --cargo-toml PATH     Path to Cargo.toml (default: Cargo.toml)
   --arch ARCH          Platform architecture (default: auto-detected)
   --extra-file FILE     Additional file to include (can be used multiple times)
-  --build-release       Build release binaries before packaging
+  --build-only          Only build binaries, skip packaging
+  --package-only        Only package existing binaries (error if not built)
   --help, -h            Show this help message
 
 Examples:
-  $0 --build-release
+  $0                                    # Build and package (default)
+  $0 --build-only                       # Build without packaging
+  $0 --package-only                     # Package only (must be built first)
   $0 --out-dir releases --arch linux_arm64
 EOF
       exit 0
@@ -92,6 +102,12 @@ EOF
       ;;
   esac
 done
+
+# Validate conflicting options
+if [[ "$BUILD_ONLY" == true ]] && [[ "$PACKAGE_ONLY" == true ]]; then
+  echo "Error: --build-only and --package-only are mutually exclusive" >&2
+  exit 1
+fi
 
 # Function to extract version from Cargo.toml
 get_version() {
@@ -124,10 +140,20 @@ if git rev-parse --show-toplevel &>/dev/null; then
   cd "$(git rev-parse --show-toplevel)"
 fi
 
-# Build release binaries if requested
-if [[ "$BUILD_RELEASE" == true ]]; then
+# Build release binaries (default behavior unless --package-only is specified)
+if [[ "$PACKAGE_ONLY" != true ]]; then
   echo "Building release binaries..."
   cargo build --release
+
+  # If --build-only, exit after building
+  if [[ "$BUILD_ONLY" == true ]]; then
+    echo ""
+    echo "Build complete!"
+    echo "Binaries created:"
+    echo "  GUI: target/release/bb_scrape"
+    echo "  CLI: target/release/cli"
+    exit 0
+  fi
 fi
 
 # Define files to include
@@ -148,11 +174,16 @@ for file in "${FILES[@]}"; do
   if [[ ! -f "$file" ]]; then
     echo "Error: File not found: $file" >&2
     echo "" >&2
-    echo "The release binaries have not been built yet." >&2
-    echo "Please run one of the following:" >&2
-    echo "  1. Build and package: $0 --build-release" >&2
-    echo "  2. Build first:       cargo build --release" >&2
-    echo "     Then package:      $0" >&2
+    if [[ "$PACKAGE_ONLY" == true ]]; then
+      echo "The --package-only flag was used, but binaries don't exist." >&2
+      echo "Please build first:" >&2
+      echo "  cargo build --release" >&2
+      echo "Or run without --package-only to build automatically:" >&2
+      echo "  $0" >&2
+    else
+      echo "Build failed or binaries were not created." >&2
+      echo "Please check the build output above for errors." >&2
+    fi
     exit 1
   fi
 done
